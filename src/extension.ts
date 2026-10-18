@@ -133,6 +133,13 @@ export default class SalatExtension extends Extension {
                         Config.saveConfig(this.config);
                     }
                     this.recreatePanelIndicator();
+                },
+                onToggleLock: (enabled: boolean) => {
+                    log('[SalatExtension ESM] Lock toggled: ' + enabled);
+                    if (this.config) {
+                        this.config.lockEnabled = enabled;
+                        Config.saveConfig(this.config);
+                    }
                 }
             });
             log('[SalatExtension ESM] UI sync completed successfully.');
@@ -164,18 +171,18 @@ export default class SalatExtension extends Extension {
     private getIconFile(): any {
         try {
             if (this.dir) {
-                let file = this.dir.get_child('mosque_white.svg');
+                let file = this.dir.get_child('mosque_pic.svg');
                 if (file.query_exists(null)) return file;
             }
             if (this.path) {
-                let path = GLib.build_filenamev([this.path, 'mosque_white.svg']);
+                let path = GLib.build_filenamev([this.path, 'mosque_pic.svg']);
                 let file = Gio.File.new_for_path(path);
                 if (file.query_exists(null)) return file;
             }
-            let curFile = Gio.File.new_for_path(GLib.build_filenamev([GLib.get_current_dir(), 'mosque_white.svg']));
+            let curFile = Gio.File.new_for_path(GLib.build_filenamev([GLib.get_current_dir(), 'mosque_pic.svg']));
             if (curFile.query_exists(null)) return curFile;
         } catch (e: any) {
-            log('[SalatExtension ESM] Error locating mosque_white.svg: ' + e.message);
+            log('[SalatExtension ESM] Error locating mosque_pic.svg: ' + e.message);
         }
         return null;
     }
@@ -233,6 +240,20 @@ export default class SalatExtension extends Extension {
 
     private getAdhanAudioPath(): string | null {
         try {
+            // 1. Check user configured custom adhan path
+            if (this.config && this.config.adhanAudioPath && this.config.adhanAudioPath.trim().length > 0) {
+                let customPath = this.config.adhanAudioPath.trim();
+                if (customPath.startsWith('~')) {
+                    customPath = GLib.get_home_dir() + customPath.slice(1);
+                }
+                if (GLib.file_test(customPath, GLib.FileTest.EXISTS)) {
+                    return customPath;
+                } else {
+                    log('[SalatExtension ESM] Custom adhan path not found: ' + customPath + ', falling back to bundled audio.');
+                }
+            }
+
+            // 2. Default bundled adan.mp3
             if (this.dir) {
                 let file = this.dir.get_child('adan.mp3');
                 if (file.query_exists(null)) return file.get_path();
@@ -252,13 +273,13 @@ export default class SalatExtension extends Extension {
     private playAdhanSound(): void {
         const audioPath = this.getAdhanAudioPath();
         if (!audioPath) {
-            log('[SalatExtension ESM] Cannot play adhan: adan.mp3 not found.');
+            log('[SalatExtension ESM] Cannot play adhan: audio file not found.');
             return;
         }
 
-        log('[SalatExtension ESM]  Triggering Adhan audio playback: ' + audioPath);
+        log('[SalatExtension ESM] 📢 Triggering Adhan audio playback: ' + audioPath);
         try {
-            GLib.spawn_command_line_async('notify-send "Salat Timer" " Adhan time!"');
+            GLib.spawn_command_line_async('notify-send "Salat Timer" "📢 Adhan time!"');
             if (GLib.find_program_in_path('cvlc')) {
                 GLib.spawn_command_line_async(`cvlc --play-and-exit --no-video "${audioPath}"`);
             } else if (GLib.find_program_in_path('pw-play')) {
@@ -275,18 +296,32 @@ export default class SalatExtension extends Extension {
     }
 
     private runFtLock(): void {
-        log('[SalatExtension ESM] 🔒 Iqama finished! Triggering ft_lock...');
+        if (!this.config || !this.config.lockEnabled) {
+            log('[SalatExtension ESM] Lock feature disabled in settings. Skipping lock.');
+            return;
+        }
+        log('[SalatExtension ESM] 🔒 Iqama finished! Triggering screen lock...');
         try {
-            GLib.spawn_command_line_async('notify-send -u critical "Salat Timer" "🔒 Iqama finished! Locking screen via ft_lock..."');
+            GLib.spawn_command_line_async('notify-send -u critical "Salat Timer" "🔒 Iqama finished! Locking screen..."');
+
+            if (this.config.customLockCommand && this.config.customLockCommand.trim().length > 0) {
+                GLib.spawn_command_line_async(this.config.customLockCommand.trim());
+                return;
+            }
+
             if (GLib.find_program_in_path('ft_lock')) {
                 GLib.spawn_command_line_async('ft_lock');
             } else if (GLib.file_test('/usr/share/42/ft_lock', GLib.FileTest.IS_EXECUTABLE)) {
                 GLib.spawn_command_line_async('/usr/share/42/ft_lock');
             } else if (GLib.file_test('/usr/local/bin/ft_lock', GLib.FileTest.IS_EXECUTABLE)) {
                 GLib.spawn_command_line_async('/usr/local/bin/ft_lock');
+            } else if (GLib.find_program_in_path('loginctl')) {
+                GLib.spawn_command_line_async('loginctl lock-session');
+            } else if (GLib.find_program_in_path('gnome-screensaver-command')) {
+                GLib.spawn_command_line_async('gnome-screensaver-command -l');
             }
         } catch (e: any) {
-            log('[SalatExtension ESM] Error executing ft_lock: ' + e.message);
+            log('[SalatExtension ESM] Error executing lock: ' + e.message);
         }
     }
 
@@ -320,7 +355,13 @@ export default class SalatExtension extends Extension {
             if (iqamaDiff >= 0 && !this.triggeredIqamas[iqamaKey]) {
                 this.triggeredIqamas[iqamaKey] = true;
                 if (iqamaDiff <= 30000) { // Only fire if current time is within 30s of Iqama finish
-                    this.runFtLock();
+                    if (this.config.lockEnabled) {
+                        this.runFtLock();
+                    } else {
+                        try {
+                            GLib.spawn_command_line_async(`notify-send "Salat Timer" "🕌 Iqama time for ${p.name}!"`);
+                        } catch (e: any) {}
+                    }
                 }
             }
         }

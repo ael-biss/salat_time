@@ -7,7 +7,10 @@ export function loadConfig(): UserConfig {
     let config: UserConfig = {
         city: Constants.CITIES[0],
         lang: 'auto',
-        iqamaDelays: Object.assign({}, Constants.DEFAULT_IQAMA_DELAYS)
+        iqamaDelays: Object.assign({}, Constants.DEFAULT_IQAMA_DELAYS),
+        lockEnabled: false,
+        customLockCommand: '',
+        adhanAudioPath: ''
     };
     try {
         if (!GLib.file_test(Constants.CONFIG_FILE, GLib.FileTest.EXISTS)) return config;
@@ -28,6 +31,15 @@ export function loadConfig(): UserConfig {
                 config.iqamaDelays[k] = (!isNaN(val) && val > 0) ? val : Constants.DEFAULT_IQAMA_DELAYS[k];
             }
         }
+        if (parsed.lockEnabled !== undefined) {
+            config.lockEnabled = Boolean(parsed.lockEnabled);
+        }
+        if (typeof parsed.customLockCommand === 'string') {
+            config.customLockCommand = parsed.customLockCommand;
+        }
+        if (typeof parsed.adhanAudioPath === 'string') {
+            config.adhanAudioPath = parsed.adhanAudioPath;
+        }
     } catch (e: any) {
         log('[SalatExtension Config] Load error: ' + e.message);
     }
@@ -43,7 +55,10 @@ export function saveConfig(config: UserConfig): void {
             cityId: config.city.id,
             cityName: config.city.name,
             lang: config.lang,
-            iqamaDelays: config.iqamaDelays
+            iqamaDelays: config.iqamaDelays,
+            lockEnabled: config.lockEnabled ?? false,
+            customLockCommand: config.customLockCommand ?? '',
+            adhanAudioPath: config.adhanAudioPath ?? ''
         }, null, 2);
         GLib.file_set_contents(Constants.CONFIG_FILE, new TextEncoder().encode(data));
         log('[SalatExtension Config] Saved config successfully to ' + Constants.CONFIG_FILE);

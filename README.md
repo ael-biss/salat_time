@@ -7,7 +7,7 @@ A clean, lightweight, and modular GNOME Shell extension for Moroccan prayer time
 - **Iqama Countdown**: Dynamic countdown until congregation prayer with customizable per-prayer delays.
 - **Auto-Lock Screen**: Automatically invokes `ft_lock` when the Iqama countdown reaches zero.
 - **Audio Adhan**: Plays `adan.mp3` asynchronously with desktop notification upon Adhan time.
-- **Custom Panel Icon**: Features a clean SVG mosque icon (`mosque_white.svg`) in the top panel.
+- **Custom Panel Icon**: Features a clean SVG mosque icon (`mosque_pic.svg`) in the top panel.
 - **Preferences UI**: GTK4 / Libadwaita preferences window to configure city, language, and Iqama delays.
 
 ---
@@ -21,7 +21,7 @@ salat-gnome-extension/
 ├── README.md            # Documentation
 ├── dist/legacy/         # Pre-compiled JavaScript extension files (for GNOME Shell 42.9)
 ├── adan.mp3             # Adhan audio asset
-├── mosque_white.svg     # Top panel status icon
+├── mosque_pic.svg     # Top panel status icon
 └── src/                 # Extension TypeScript Source Directory
     ├── metadata.json    # Extension metadata (GNOME 42 / 42.9)
     ├── types.d.ts       # GJS & GNOME Shell ambient TypeScript definitions

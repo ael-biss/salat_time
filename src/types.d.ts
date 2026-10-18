@@ -37,6 +37,9 @@ interface UserConfig {
     city: City;
     lang: string;
     iqamaDelays: IqamaDelays;
+    lockEnabled?: boolean;
+    customLockCommand?: string;
+    adhanAudioPath?: string;
 }
 
 interface PrayerTimesData {

@@ -13,7 +13,7 @@ HAS_TSC       := $(if $(TSC_BIN),1,0)
 # Targeted specifically for GNOME 42.9
 GNOME_VER     := 42.9
 
-.PHONY: all compile compile-legacy compile-esm compile-all build install run nested uninstall prefs pack check logs clean distclean help re
+.PHONY: all compile compile-legacy compile-esm compile-all build install run uninstall prefs pack check logs clean distclean help re
 
 all: install
 
@@ -36,7 +36,7 @@ compile-esm:
 		npx tsc -p tsconfig.esm.json ; \
 	fi
 	@cp -f src/metadata.json $(DIST_DIR)/esm/
-	@cp -f mosque_white.svg $(DIST_DIR)/esm/ 2>/dev/null || cp -f src/mosque_white.svg $(DIST_DIR)/esm/
+	@cp -f mosque_pic.svg $(DIST_DIR)/esm/ 2>/dev/null || cp -f src/mosque_pic.svg $(DIST_DIR)/esm/
 	@cp -f src/adan.mp3 $(DIST_DIR)/esm/ 2>/dev/null || cp -f src/adan.mp3 $(DIST_DIR)/esm/
 	@echo "✔ TS compilation successful!"
 
@@ -72,12 +72,9 @@ install:
 		gnome-extensions disable $(UUID) 2>/dev/null || true; \
 		gnome-extensions enable $(UUID) 2>/dev/null || true; \
 	fi
-	@if [ "$$XDG_SESSION_TYPE" = "x11" ] && pgrep gnome-shell > /dev/null 2>&1; then \
+	@if pgrep gnome-shell > /dev/null 2>&1; then \
 		echo " 🔄 Reloading GNOME Shell on X11..."; \
 		kill -HUP $$(pgrep gnome-shell | xargs) 2>/dev/null || true; \
-	elif [ "$$XDG_SESSION_TYPE" = "wayland" ]; then \
-		echo " 💡 Wayland session detected: Toggled extension enable/disable via CLI."; \
-		echo " 💡 Note: If this is a first-time installation and GNOME Shell hasn't indexed the extension yet, log out and log back in, or run 'make nested'."; \
 	fi
 	@echo " 🔍 Verifying extension status..."
 	@if command -v gnome-extensions > /dev/null 2>&1; then \
@@ -103,7 +100,7 @@ uninstall:
 pack: compile check
 	@echo " 📦 Packaging extension zip bundle for GNOME 42.9..."
 	@if command -v gnome-extensions > /dev/null 2>&1; then \
-		gnome-extensions pack $(DIST_DIR)/legacy --force --out-dir=. --extra-source=metadata.json --extra-source=mosque_white.svg --extra-source=adan.mp3 ; \
+		gnome-extensions pack $(DIST_DIR)/legacy --force --out-dir=. --extra-source=metadata.json --extra-source=mosque_pic.svg --extra-source=adan.mp3 ; \
 		cp -f $(UUID).shell-extension.zip $(UUID).zip 2>/dev/null || true ; \
 	else \
 		(cd $(DIST_DIR)/legacy && zip -r "../../$(UUID).zip" .) ; \

@@ -73,6 +73,13 @@ function reloadAndSyncUI() {
                     Config.saveConfig(config);
                 }
                 recreatePanelIndicator();
+            },
+            onToggleLock: (enabled) => {
+                log('[SalatExtension Legacy] Lock toggled: ' + enabled);
+                if (config) {
+                    config.lockEnabled = enabled;
+                    Config.saveConfig(config);
+                }
             }
         });
         log('[SalatExtension Legacy] UI sync completed successfully.');
@@ -106,24 +113,36 @@ function getIconFile() {
     try {
         const Me = ExtensionUtils.getCurrentExtension();
         if (Me && Me.dir) {
-            let file = Me.dir.get_child('mosque_white.svg');
+            let file = Me.dir.get_child('mosque_pic.svg');
             if (file.query_exists(null)) return file;
         }
         if (Me && Me.path) {
-            let path = GLib.build_filenamev([Me.path, 'mosque_white.svg']);
+            let path = GLib.build_filenamev([Me.path, 'mosque_pic.svg']);
             let file = Gio.File.new_for_path(path);
             if (file.query_exists(null)) return file;
         }
-        let curFile = Gio.File.new_for_path(GLib.build_filenamev([GLib.get_current_dir(), 'mosque_white.svg']));
+        let curFile = Gio.File.new_for_path(GLib.build_filenamev([GLib.get_current_dir(), 'mosque_pic.svg']));
         if (curFile.query_exists(null)) return curFile;
     } catch (e) {
-        log('[SalatExtension Legacy] Error locating mosque_white.svg: ' + e.message);
+        log('[SalatExtension Legacy] Error locating mosque_pic.svg: ' + e.message);
     }
     return null;
 }
 
 function getAdhanAudioPath() {
     try {
+        if (config && config.adhanAudioPath && config.adhanAudioPath.trim().length > 0) {
+            let customPath = config.adhanAudioPath.trim();
+            if (customPath.startsWith('~')) {
+                customPath = GLib.get_home_dir() + customPath.slice(1);
+            }
+            if (GLib.file_test(customPath, GLib.FileTest.EXISTS)) {
+                return customPath;
+            } else {
+                log('[SalatExtension Legacy] Custom adhan path not found: ' + customPath + ', falling back to bundled audio.');
+            }
+        }
+
         const Me = ExtensionUtils.getCurrentExtension();
         if (Me && Me.dir) {
             let file = Me.dir.get_child('adan.mp3');
@@ -144,13 +163,13 @@ function getAdhanAudioPath() {
 function playAdhanSound() {
     const audioPath = getAdhanAudioPath();
     if (!audioPath) {
-        log('[SalatExtension Legacy] Cannot play adhan: adan.mp3 not found.');
+        log('[SalatExtension Legacy] Cannot play adhan: audio file not found.');
         return;
     }
 
-    log('[SalatExtension Legacy]  Triggering Adhan audio playback: ' + audioPath);
+    log('[SalatExtension Legacy] 📢 Triggering Adhan audio playback: ' + audioPath);
     try {
-        GLib.spawn_command_line_async('notify-send "Salat Timer" " Adhan time!"');
+        GLib.spawn_command_line_async('notify-send "Salat Timer" "📢 Adhan time!"');
         if (GLib.find_program_in_path('cvlc')) {
             GLib.spawn_command_line_async('cvlc --play-and-exit --no-video "' + audioPath + '"');
         } else if (GLib.find_program_in_path('pw-play')) {
@@ -167,18 +186,32 @@ function playAdhanSound() {
 }
 
 function runFtLock() {
-    log('[SalatExtension Legacy] 🔒 Iqama finished! Triggering ft_lock...');
+    if (!config || !config.lockEnabled) {
+        log('[SalatExtension Legacy] Lock feature disabled in settings. Skipping lock.');
+        return;
+    }
+    log('[SalatExtension Legacy] 🔒 Iqama finished! Triggering screen lock...');
     try {
-        GLib.spawn_command_line_async('notify-send -u critical "Salat Timer" "🔒 Iqama finished! Locking screen via ft_lock..."');
+        GLib.spawn_command_line_async('notify-send -u critical "Salat Timer" "🔒 Iqama finished! Locking screen..."');
+
+        if (config.customLockCommand && config.customLockCommand.trim().length > 0) {
+            GLib.spawn_command_line_async(config.customLockCommand.trim());
+            return;
+        }
+
         if (GLib.find_program_in_path('ft_lock')) {
             GLib.spawn_command_line_async('ft_lock');
         } else if (GLib.file_test('/usr/share/42/ft_lock', GLib.FileTest.IS_EXECUTABLE)) {
             GLib.spawn_command_line_async('/usr/share/42/ft_lock');
         } else if (GLib.file_test('/usr/local/bin/ft_lock', GLib.FileTest.IS_EXECUTABLE)) {
             GLib.spawn_command_line_async('/usr/local/bin/ft_lock');
+        } else if (GLib.find_program_in_path('loginctl')) {
+            GLib.spawn_command_line_async('loginctl lock-session');
+        } else if (GLib.find_program_in_path('gnome-screensaver-command')) {
+            GLib.spawn_command_line_async('gnome-screensaver-command -l');
         }
     } catch (e) {
-        log('[SalatExtension Legacy] Error executing ft_lock: ' + e.message);
+        log('[SalatExtension Legacy] Error executing lock: ' + e.message);
     }
 }
 
@@ -211,7 +244,13 @@ function checkPrayerEvents(now) {
         if (iqamaDiff >= 0 && !triggeredIqamas[iqamaKey]) {
             triggeredIqamas[iqamaKey] = true;
             if (iqamaDiff <= 30000) {
-                runFtLock();
+                if (config.lockEnabled) {
+                    runFtLock();
+                } else {
+                    try {
+                        GLib.spawn_command_line_async('notify-send "Salat Timer" "🕌 Iqama time for ' + p.name + '!"');
+                    } catch (e) {}
+                }
             }
         }
     }

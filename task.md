@@ -3,7 +3,7 @@ Here is the step-by-step architectural breakdown of how to implement **playing `
 ---
 
 ### Step 1: Asset Placement & Build Pipeline
-You need to make sure `adan.mp3` is packaged and accessible at runtime alongside `mosque_white.svg`:
+You need to make sure `adan.mp3` is packaged and accessible at runtime alongside `mosque_pic.svg`:
 1. **Source directory**: Keep `adan.mp3` in `src/adan.mp3` (and root).
 2. **Build script ([`Makefile`](file:///home/ael-biss/Student_projects/vibecode/salat-gnome-extension/Makefile))**:
    - In `compile-esm`: copy `adan.mp3` to `dist/esm/`.
@@ -38,7 +38,7 @@ private getAdhanAudioPath(): string | null {
 ---
 
 ### Step 3: Audio Playback Mechanism
-GNOME Shell runs the entire Wayland/X11 compositor UI thread. Audio playback must **never run synchronously** inside GNOME Shell's main loop.
+GNOME Shell runs the entire compositor UI thread. Audio playback must **never run synchronously** inside GNOME Shell's main loop.
 
 Spawning a lightweight background process with `GLib.spawn_command_line_async` is the safest, non-blocking approach:
 

@@ -2,6 +2,7 @@
 import GLib from 'gi://GLib';
 import * as PopupMenu from 'resource:///org/gnome/shell/ui/popupMenu.js';
 import * as Calculator from './calculator.js';
+import * as Config from './config.js';
 import * as I18n from './i18n.js';
 export function updatePanelText(indicator, prayerTimesData, iqamaDelays, currentLang) {
     if (!prayerTimesData || !indicator)
@@ -54,8 +55,21 @@ export function rebuildMenu(indicator, config, prayerTimesData, callbacks) {
         indicator.menu.addMenuItem(new PopupMenu.PopupMenuItem(itemText));
     }
     indicator.menu.addMenuItem(new PopupMenu.PopupSeparatorMenuItem());
-    // 3. Settings window launcher
-    let openPrefsItem = new PopupMenu.PopupMenuItem('⚙ Open Settings');
+    // 3. Quick toggle for Screen Lock on Iqama
+    let lockLabel = I18n.t('lock_screen', config.lang);
+    let lockSwitchItem = new PopupMenu.PopupSwitchMenuItem(lockLabel, !!config.lockEnabled);
+    lockSwitchItem.connect('toggled', (item) => {
+        config.lockEnabled = item.state;
+        if (callbacks && typeof callbacks.onToggleLock === 'function') {
+            callbacks.onToggleLock(item.state);
+        }
+        else {
+            Config.saveConfig(config);
+        }
+    });
+    indicator.menu.addMenuItem(lockSwitchItem);
+    // 4. Settings window launcher
+    let openPrefsItem = new PopupMenu.PopupMenuItem(I18n.t('open_settings', config.lang));
     openPrefsItem.connect('activate', () => {
         try {
             GLib.spawn_command_line_async('gnome-extensions prefs salat-timer@moroccan-habous');

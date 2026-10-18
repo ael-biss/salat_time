@@ -2,9 +2,41 @@
 import { ExtensionPreferences } from 'resource:///org/gnome/Shell/Extensions/js/extensions/prefs.js';
 import Adw from 'gi://Adw';
 import Gtk from 'gi://Gtk';
+import GLib from 'gi://GLib';
 import * as Constants from './constants.js';
 import * as Config from './config.js';
 import * as I18n from './i18n.js';
+function playAudioPreview(path) {
+    if (!path)
+        return;
+    try {
+        if (GLib.find_program_in_path('cvlc')) {
+            GLib.spawn_command_line_async(`cvlc --play-and-exit --no-video "${path}"`);
+        }
+        else if (GLib.find_program_in_path('pw-play')) {
+            GLib.spawn_command_line_async(`pw-play "${path}"`);
+        }
+        else if (GLib.find_program_in_path('paplay')) {
+            GLib.spawn_command_line_async(`paplay "${path}"`);
+        }
+        else {
+            const pyScript = `import gi, sys; gi.require_version('Gst', '1.0'); from gi.repository import Gst, GLib; Gst.init(None); p = Gst.ElementFactory.make('playbin', 'p'); p.set_property('uri', 'file://' + sys.argv[1]); p.set_state(Gst.State.PLAYING); loop = GLib.MainLoop(); b = p.get_bus(); b.add_watch(GLib.PRIORITY_DEFAULT, lambda bus, msg: loop.quit() if msg.type in (Gst.MessageType.EOS, Gst.MessageType.ERROR) else True); loop.run()`;
+            GLib.spawn_command_line_async(`python3 -c "${pyScript}" "${path}"`);
+        }
+    }
+    catch (e) {
+        log('[SalatExtension Prefs] Error in audio test: ' + e.message);
+    }
+}
+function resolveDefaultAdhanPath() {
+    let cur = GLib.build_filenamev([GLib.get_current_dir(), 'adan.mp3']);
+    if (GLib.file_test(cur, GLib.FileTest.EXISTS))
+        return cur;
+    let extPath = GLib.build_filenamev([GLib.get_home_dir(), '.local', 'share', 'gnome-shell', 'extensions', 'salat-timer@moroccan-habous', 'adan.mp3']);
+    if (GLib.file_test(extPath, GLib.FileTest.EXISTS))
+        return extPath;
+    return '';
+}
 export default class SalatPreferences extends ExtensionPreferences {
     fillPreferencesWindow(window) {
         let config = Config.loadConfig();
@@ -81,7 +113,121 @@ export default class SalatPreferences extends ExtensionPreferences {
             prayerRows.push({ def: p, row: row });
         });
         prefsPage.add(iqamaGroup);
-        // 3. Save & Apply Actions Group
+        // 3. Adhan Audio Group
+        let adhanGroup = new Adw.PreferencesGroup();
+        let audioPathRow = new Adw.ActionRow();
+        let audioPathEntry = new Gtk.Entry({
+            valign: Gtk.Align.CENTER,
+            hexpand: true,
+            text: config.adhanAudioPath || '',
+            placeholder_text: I18n.t('prefs_adhan_default', config.lang)
+        });
+        audioPathEntry.connect('changed', (widget) => {
+            config.adhanAudioPath = widget.get_text();
+            Config.saveConfig(config);
+        });
+        audioPathRow.add_suffix(audioPathEntry);
+        let browseBtn = new Gtk.Button({
+            label: I18n.t('prefs_adhan_browse', config.lang),
+            valign: Gtk.Align.CENTER,
+            margin_start: 6
+        });
+        browseBtn.connect('clicked', () => {
+            try {
+                let fileChooser = new Gtk.FileChooserNative({
+                    title: I18n.t('prefs_adhan_title', config.lang),
+                    transient_for: window,
+                    action: Gtk.FileChooserAction.OPEN
+                });
+                let filter = new Gtk.FileFilter();
+                filter.set_name('Audio Files (*.mp3, *.wav, *.ogg)');
+                filter.add_mime_type('audio/*');
+                filter.add_pattern('*.mp3');
+                filter.add_pattern('*.wav');
+                filter.add_pattern('*.ogg');
+                fileChooser.add_filter(filter);
+                fileChooser.connect('response', (dialog, response_id) => {
+                    if (response_id === Gtk.ResponseType.ACCEPT) {
+                        let file = dialog.get_file();
+                        if (file) {
+                            let path = file.get_path();
+                            audioPathEntry.set_text(path);
+                            config.adhanAudioPath = path;
+                            Config.saveConfig(config);
+                        }
+                    }
+                    dialog.destroy();
+                });
+                fileChooser.show();
+            }
+            catch (e) {
+                log('[SalatExtension Prefs] File chooser error: ' + e.message);
+            }
+        });
+        audioPathRow.add_suffix(browseBtn);
+        let testBtn = new Gtk.Button({
+            label: I18n.t('prefs_adhan_test', config.lang),
+            valign: Gtk.Align.CENTER,
+            margin_start: 6
+        });
+        testBtn.connect('clicked', () => {
+            let path = audioPathEntry.get_text().trim();
+            if (path.startsWith('~')) {
+                path = GLib.get_home_dir() + path.slice(1);
+            }
+            if (!path) {
+                path = resolveDefaultAdhanPath();
+            }
+            if (path && GLib.file_test(path, GLib.FileTest.EXISTS)) {
+                playAudioPreview(path);
+            }
+            else {
+                log('[SalatExtension Prefs] Audio file not found: ' + path);
+            }
+        });
+        audioPathRow.add_suffix(testBtn);
+        let resetBtn = new Gtk.Button({
+            label: I18n.t('prefs_adhan_reset', config.lang),
+            valign: Gtk.Align.CENTER,
+            margin_start: 6
+        });
+        resetBtn.connect('clicked', () => {
+            audioPathEntry.set_text('');
+            config.adhanAudioPath = '';
+            Config.saveConfig(config);
+        });
+        audioPathRow.add_suffix(resetBtn);
+        adhanGroup.add(audioPathRow);
+        prefsPage.add(adhanGroup);
+        // 4. Lock Screen Group
+        let lockGroup = new Adw.PreferencesGroup();
+        let lockSwitchRow = new Adw.ActionRow();
+        let lockSwitch = new Gtk.Switch({
+            valign: Gtk.Align.CENTER,
+            active: !!config.lockEnabled
+        });
+        lockSwitch.connect('notify::active', (widget) => {
+            config.lockEnabled = widget.get_active();
+            Config.saveConfig(config);
+        });
+        lockSwitchRow.add_suffix(lockSwitch);
+        lockSwitchRow.activatable_widget = lockSwitch;
+        lockGroup.add(lockSwitchRow);
+        let lockCmdRow = new Adw.ActionRow();
+        let lockCmdEntry = new Gtk.Entry({
+            valign: Gtk.Align.CENTER,
+            hexpand: true,
+            text: config.customLockCommand || '',
+            placeholder_text: 'ft_lock (default)'
+        });
+        lockCmdEntry.connect('changed', (widget) => {
+            config.customLockCommand = widget.get_text();
+            Config.saveConfig(config);
+        });
+        lockCmdRow.add_suffix(lockCmdEntry);
+        lockGroup.add(lockCmdRow);
+        prefsPage.add(lockGroup);
+        // 5. Save & Apply Actions Group
         let actionsGroup = new Adw.PreferencesGroup();
         let actionRow = new Adw.ActionRow();
         let saveButton = new Gtk.Button({
@@ -104,16 +250,30 @@ export default class SalatPreferences extends ExtensionPreferences {
         // Dynamic UI Text Refresh Helper
         const updatePrefsText = () => {
             let lang = config.lang || 'auto';
-            generalGroup.set_title(I18n.t('prefs_general_title', lang));
+            generalGroup.set_title(GLib.markup_escape_text(I18n.t('prefs_general_title', lang), -1));
             generalGroup.set_description(I18n.t('prefs_general_desc', lang));
             cityRow.set_title(I18n.t('prefs_city_title', lang));
             langRow.set_title(I18n.t('prefs_lang_title', lang));
-            iqamaGroup.set_title(I18n.t('prefs_iqama_title', lang));
+            iqamaGroup.set_title(GLib.markup_escape_text(I18n.t('prefs_iqama_title', lang), -1));
             iqamaGroup.set_description(I18n.t('prefs_iqama_desc', lang));
             prayerRows.forEach(item => {
                 item.row.set_title(I18n.t(item.def.i18nKey, lang));
             });
-            actionsGroup.set_title(I18n.t('prefs_actions_title', lang));
+            adhanGroup.set_title(GLib.markup_escape_text(I18n.t('prefs_adhan_title', lang), -1));
+            adhanGroup.set_description(I18n.t('prefs_adhan_desc', lang));
+            audioPathRow.set_title(I18n.t('prefs_adhan_path', lang));
+            audioPathRow.set_subtitle(I18n.t('prefs_adhan_path_sub', lang));
+            audioPathEntry.set_placeholder_text(I18n.t('prefs_adhan_default', lang));
+            browseBtn.set_label(I18n.t('prefs_adhan_browse', lang));
+            testBtn.set_label(I18n.t('prefs_adhan_test', lang));
+            resetBtn.set_label(I18n.t('prefs_adhan_reset', lang));
+            lockGroup.set_title(GLib.markup_escape_text(I18n.t('prefs_lock_title', lang), -1));
+            lockGroup.set_description(I18n.t('prefs_lock_desc', lang));
+            lockSwitchRow.set_title(I18n.t('prefs_lock_enable', lang));
+            lockSwitchRow.set_subtitle(I18n.t('prefs_lock_enable_sub', lang));
+            lockCmdRow.set_title(I18n.t('prefs_lock_cmd', lang));
+            lockCmdRow.set_subtitle(I18n.t('prefs_lock_cmd_sub', lang));
+            actionsGroup.set_title(GLib.markup_escape_text(I18n.t('prefs_actions_title', lang), -1));
             actionRow.set_title(I18n.t('prefs_actions_title', lang));
             saveButton.set_label(I18n.t('prefs_save_button', lang));
             if (statusLabel.get_text() !== '') {
