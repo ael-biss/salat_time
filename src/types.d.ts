@@ -40,6 +40,27 @@ interface UserConfig {
     lockEnabled?: boolean;
     customLockCommand?: string;
     adhanAudioPath?: string;
+    duaaAfterAdhan?: boolean;
+    duaaAudioPath?: string;
+    fridayReminderEnabled?: boolean;
+    fridayReminderMinutes?: number;
+    wuduReminderEnabled?: boolean;
+    wuduReminderMinutes?: number;
+    wuduAudioPath?: string;
+}
+
+interface MonthlyCacheData {
+    cities: {
+        [cityId: string]: {
+            [yearMonth: string]: {
+                [day: string]: PrayerTimesData;
+            };
+        };
+    };
+    lastSyncTimes?: {
+        [key: string]: number;
+    };
+    lastUpdated?: number;
 }
 
 interface PrayerTimesData {

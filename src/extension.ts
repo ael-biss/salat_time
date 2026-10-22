@@ -25,6 +25,8 @@ export default class SalatExtension extends Extension {
     private prayerTimesData: PrayerTimesData | null = null;
     private triggeredAdhans: Record<string, boolean> = {};
     private triggeredIqamas: Record<string, boolean> = {};
+    private triggeredFridayReminders: Record<string, boolean> = {};
+    private triggeredWuduReminders: Record<string, boolean> = {};
 
     enable() {
         log('[SalatExtension ESM] Enabling extension...');
@@ -315,10 +317,8 @@ export default class SalatExtension extends Extension {
                 GLib.spawn_command_line_async('/usr/share/42/ft_lock');
             } else if (GLib.file_test('/usr/local/bin/ft_lock', GLib.FileTest.IS_EXECUTABLE)) {
                 GLib.spawn_command_line_async('/usr/local/bin/ft_lock');
-            } else if (GLib.find_program_in_path('loginctl')) {
-                GLib.spawn_command_line_async('loginctl lock-session');
-            } else if (GLib.find_program_in_path('gnome-screensaver-command')) {
-                GLib.spawn_command_line_async('gnome-screensaver-command -l');
+            } else {
+                log('[SalatExtension ESM] ft_lock executable not found on system.');
             }
         } catch (e: any) {
             log('[SalatExtension ESM] Error executing lock: ' + e.message);
@@ -340,6 +340,21 @@ export default class SalatExtension extends Extension {
         for (let p of prayers) {
             const adhanKey = `${datePrefix}_${p.key}_adhan`;
             const iqamaKey = `${datePrefix}_${p.key}_iqama`;
+            const wuduKey = `${datePrefix}_${p.key}_wudu`;
+
+            // 0. Wudu Reminder: now >= adhanDate - wuduMins
+            if (this.config.wuduReminderEnabled !== false) {
+                const wuduMins = this.config.wuduReminderMinutes ?? 15;
+                const wuduTime = new Date(p.adhanDate.getTime() - wuduMins * 60000);
+                const wuduDiff = now.getTime() - wuduTime.getTime();
+
+                if (wuduDiff >= 0 && !this.triggeredWuduReminders[wuduKey]) {
+                    this.triggeredWuduReminders[wuduKey] = true;
+                    if (wuduDiff <= 60000) {
+                        this.triggerWuduReminder(p.name, wuduMins);
+                    }
+                }
+            }
 
             // 1. Adhan Trigger: now >= adhanDate (within a 30s window to handle system lag/sleep)
             const adhanDiff = now.getTime() - p.adhanDate.getTime();
@@ -347,6 +362,14 @@ export default class SalatExtension extends Extension {
                 this.triggeredAdhans[adhanKey] = true;
                 if (adhanDiff <= 30000) { // Only fire if current time is within 30s of Adhan
                     this.playAdhanSound();
+
+                    // Optional Du'aa after Adhan
+                    if (this.config.duaaAfterAdhan !== false) {
+                        GLib.timeout_add_seconds(GLib.PRIORITY_DEFAULT, 15, () => {
+                            this.showDuaaAfterAdhan();
+                            return GLib.SOURCE_REMOVE;
+                        });
+                    }
                 }
             }
 
@@ -365,7 +388,113 @@ export default class SalatExtension extends Extension {
                 }
             }
         }
+
+        // 3. Friday Jumuaah Reminder (e.g. 60m before Dhuhr on Fridays)
+        if (now.getDay() === 5 && this.config.fridayReminderEnabled !== false) {
+            const dhuhr = prayers.find((pr: PrayerEntry) => pr.key === 'Dhuhr');
+            if (dhuhr) {
+                const reminderMins = this.config.fridayReminderMinutes ?? 60;
+                const reminderTime = new Date(dhuhr.adhanDate.getTime() - reminderMins * 60000);
+                const fridayDiff = now.getTime() - reminderTime.getTime();
+                const fridayKey = `${datePrefix}_friday_reminder`;
+
+                if (fridayDiff >= 0 && !this.triggeredFridayReminders[fridayKey]) {
+                    this.triggeredFridayReminders[fridayKey] = true;
+                    if (fridayDiff <= 60000) {
+                        this.triggerFridayReminder(reminderMins);
+                    }
+                }
+            }
+        }
     }
 
+    private showDuaaAfterAdhan(): void {
+        log('[SalatExtension ESM] 🤲 Showing Du\'aa after Adhan...');
+        const lang = this.config ? this.config.lang : 'auto';
+        const title = I18n.t('duaa_title', lang);
+        let body = I18n.t('duaa_text', lang);
+        if (lang === 'en') {
+            body += "\n\nO Allah, Lord of this perfect call and established prayer, grant Muhammad the intercession and distinction, and resurrect him to the praised position You have promised him.";
+        } else if (lang === 'fr') {
+            body += "\n\nÔ Allah, Seigneur de cet appel parfait et de la prière établie, accorde à Muhammad l'intercession et l'éminence, et ressuscite-le au rang louable que Tu lui as promis.";
+        }
 
+        try {
+            const safeTitle = title.replace(/"/g, '\\"');
+            const safeBody = body.replace(/"/g, '\\"');
+            GLib.spawn_command_line_async(`notify-send -u normal "${safeTitle}" "${safeBody}"`);
+        } catch (e: any) {
+            log('[SalatExtension ESM] Error sending Du\'aa notification: ' + e.message);
+        }
+
+        if (this.config && this.config.duaaAudioPath && this.config.duaaAudioPath.trim().length > 0) {
+            let audio = this.config.duaaAudioPath.trim();
+            if (audio.startsWith('~')) audio = GLib.get_home_dir() + audio.slice(1);
+            if (GLib.file_test(audio, GLib.FileTest.EXISTS)) {
+                this.playAudioFile(audio);
+            }
+        }
+    }
+
+    private triggerFridayReminder(minutes: number): void {
+        log(`[SalatExtension ESM] 🕌 Triggering Friday Jumuaah reminder (${minutes}m before Dhuhr)...`);
+        const lang = this.config ? this.config.lang : 'auto';
+        const title = I18n.t('friday_reminder_title', lang);
+        const body = I18n.t('friday_reminder_body', lang, { minutes });
+        try {
+            const safeTitle = title.replace(/"/g, '\\"');
+            const safeBody = body.replace(/"/g, '\\"');
+            GLib.spawn_command_line_async(`notify-send -u critical "${safeTitle}" "${safeBody}"`);
+        } catch (e: any) {
+            log('[SalatExtension ESM] Error sending Friday reminder: ' + e.message);
+        }
+    }
+
+    private triggerWuduReminder(prayerName: string, minutes: number): void {
+        log(`[SalatExtension ESM] 💧 Triggering Wudu reminder for ${prayerName} (${minutes}m before Adhan)...`);
+        const lang = this.config ? this.config.lang : 'auto';
+        const title = I18n.t('wudu_reminder_title', lang);
+        const body = I18n.t('wudu_reminder_body', lang, { prayer: prayerName, minutes });
+
+        try {
+            const safeTitle = title.replace(/"/g, '\\"');
+            const safeBody = body.replace(/"/g, '\\"');
+            GLib.spawn_command_line_async(`notify-send -u normal "${safeTitle}" "${safeBody}"`);
+        } catch (e: any) {
+            log('[SalatExtension ESM] Error sending Wudu notification: ' + e.message);
+        }
+
+        if (this.config && this.config.wuduAudioPath && this.config.wuduAudioPath.trim().length > 0) {
+            let audio = this.config.wuduAudioPath.trim();
+            if (audio.startsWith('~')) audio = GLib.get_home_dir() + audio.slice(1);
+            if (GLib.file_test(audio, GLib.FileTest.EXISTS)) {
+                this.playAudioFile(audio);
+                return;
+            }
+        }
+
+        try {
+            if (GLib.find_program_in_path('canberra-gtk-play')) {
+                GLib.spawn_command_line_async('canberra-gtk-play -i message-new-instant');
+            }
+        } catch (e: any) {}
+    }
+
+    private playAudioFile(audioPath: string): void {
+        if (!audioPath || !GLib.file_test(audioPath, GLib.FileTest.EXISTS)) return;
+        try {
+            if (GLib.find_program_in_path('cvlc')) {
+                GLib.spawn_command_line_async(`cvlc --play-and-exit --no-video "${audioPath}"`);
+            } else if (GLib.find_program_in_path('pw-play')) {
+                GLib.spawn_command_line_async(`pw-play "${audioPath}"`);
+            } else if (GLib.find_program_in_path('paplay')) {
+                GLib.spawn_command_line_async(`paplay "${audioPath}"`);
+            } else {
+                const pyScript = `import gi, sys; gi.require_version('Gst', '1.0'); from gi.repository import Gst, GLib; Gst.init(None); p = Gst.ElementFactory.make('playbin', 'p'); p.set_property('uri', 'file://' + sys.argv[1]); p.set_state(Gst.State.PLAYING); loop = GLib.MainLoop(); b = p.get_bus(); b.add_watch(GLib.PRIORITY_DEFAULT, lambda bus, msg: loop.quit() if msg.type in (Gst.MessageType.EOS, Gst.MessageType.ERROR) else True); loop.run()`;
+                GLib.spawn_command_line_async(`python3 -c "${pyScript}" "${audioPath}"`);
+            }
+        } catch (e: any) {
+            log('[SalatExtension ESM] Audio playback failed: ' + e.message);
+        }
+    }
 }

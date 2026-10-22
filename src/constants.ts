@@ -3,6 +3,7 @@ import GLib from 'gi://GLib';
 
 export const CONFIG_DIR: string = GLib.get_user_config_dir() + '/salat-gnome-extension';
 export const CONFIG_FILE: string = CONFIG_DIR + '/config.json';
+export const CACHE_FILE: string = CONFIG_DIR + '/cache.json';
 
 export const CITIES: City[] = [
     { id: 1, name: 'Rabat / Salé / Sala Al Jadida' },

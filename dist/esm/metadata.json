@@ -1,7 +1,0 @@
-{
-  "name": "Moroccan Salat & Iqama Timer",
-  "description": "Displays live Moroccan prayer times and Iqama countdown in the top right panel (Ministry of Awqaf / Habous).",
-  "uuid": "salat-timer@moroccan-habous",
-  "shell-version": ["42", "42.9"],
-  "version": 1
-}

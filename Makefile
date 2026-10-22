@@ -22,10 +22,10 @@ run: compile install
 	@echo " 🚀 Extension ready and enabled!"
 
 
-# Compile TS sources to ESM intermediate build
-compile-esm:
+# Compile TS sources to temporary build
+compile-ts:
 	@echo " 🔨 Compiling TypeScript sources..."
-	@mkdir -p $(DIST_DIR)/esm
+	@mkdir -p .build-tmp
 	@if [ -n "$(NODE)" ] && [ -f ./node_modules/.bin/tsc ]; then \
 		$(NODE) ./node_modules/.bin/tsc -p tsconfig.esm.json ; \
 	elif command -v tsc >/dev/null 2>&1; then \
@@ -35,38 +35,35 @@ compile-esm:
 	else \
 		npx tsc -p tsconfig.esm.json ; \
 	fi
-	@cp -f src/metadata.json $(DIST_DIR)/esm/
-	@cp -f mosque_pic.svg $(DIST_DIR)/esm/ 2>/dev/null || cp -f src/mosque_pic.svg $(DIST_DIR)/esm/
-	@cp -f src/adan.mp3 $(DIST_DIR)/esm/ 2>/dev/null || cp -f src/adan.mp3 $(DIST_DIR)/esm/
+	@cp -f src/metadata.json .build-tmp/
+	@cp -f mosque_pic.svg .build-tmp/ 2>/dev/null || cp -f src/mosque_pic.svg .build-tmp/
+	@cp -f src/adan.mp3 .build-tmp/ 2>/dev/null || cp -f src/adan.mp3 .build-tmp/
 	@echo "✔ TS compilation successful!"
 
-# Build for GNOME Shell 42.9
-compile-legacy: compile-esm
-	@$(if $(NODE),$(NODE),node) scripts/transpile-legacy.js
-
-# Compile TS if TypeScript is present; otherwise gracefully fallback to pre-compiled JS
+# Compile and generate extension for GNOME Shell 42.9 directly in dist/
 compile:
 	@if [ "$(HAS_TSC)" = "1" ] && [ -n "$(NODE)" ]; then \
-		$(MAKE) compile-legacy ; \
-	elif [ -f "$(DIST_DIR)/legacy/extension.js" ]; then \
-		echo " ℹ TypeScript not installed on host machine. Using pre-compiled JavaScript in dist/legacy/..." ; \
+		$(MAKE) compile-ts ; \
+		$(if $(NODE),$(NODE),node) scripts/transpile-legacy.js ; \
+	elif [ -f "$(DIST_DIR)/extension.js" ]; then \
+		echo " ℹ TypeScript not installed on host machine. Using pre-compiled JavaScript in dist/..." ; \
 	else \
 		echo "❌ Error: TypeScript (tsc) is required to build from source, but was not found." ; \
-		echo "   Please install dependencies with 'npm install' or provide pre-compiled files in dist/legacy/." ; \
+		echo "   Please install dependencies with 'npm install' or provide pre-compiled files in dist/." ; \
 		exit 1 ; \
 	fi
 
 build: compile
 
-# Install extension for GNOME Shell 42.9 (No TypeScript or Node required)
+# Install extension for GNOME Shell 42.9 directly from dist/
 install:
-	@if [ ! -d "$(DIST_DIR)/legacy" ]; then \
-		echo "❌ Error: '$(DIST_DIR)/legacy' directory not found. Please run 'make compile' first."; \
+	@if [ ! -f "$(DIST_DIR)/extension.js" ]; then \
+		echo "❌ Error: '$(DIST_DIR)/extension.js' not found. Please run 'make compile' first."; \
 		exit 1; \
 	fi
-	@echo " 🚀 Installing extension from $(DIST_DIR)/legacy to $(EXT_DIR)..."
+	@echo " 🚀 Installing extension from $(DIST_DIR) to $(EXT_DIR)..."
 	@mkdir -p "$(EXT_DIR)"
-	@cp -r $(DIST_DIR)/legacy/* "$(EXT_DIR)/"
+	@cp -r $(DIST_DIR)/* "$(EXT_DIR)/"
 	@echo " 🔄 Refreshing extension state..."
 	@if command -v gnome-extensions > /dev/null 2>&1; then \
 		gnome-extensions disable $(UUID) 2>/dev/null || true; \
@@ -100,18 +97,18 @@ uninstall:
 pack: compile check
 	@echo " 📦 Packaging extension zip bundle for GNOME 42.9..."
 	@if command -v gnome-extensions > /dev/null 2>&1; then \
-		gnome-extensions pack $(DIST_DIR)/legacy --force --out-dir=. --extra-source=metadata.json --extra-source=mosque_pic.svg --extra-source=adan.mp3 ; \
+		gnome-extensions pack $(DIST_DIR) --force --out-dir=. --extra-source=metadata.json --extra-source=mosque_pic.svg --extra-source=adan.mp3 ; \
 		cp -f $(UUID).shell-extension.zip $(UUID).zip 2>/dev/null || true ; \
 	else \
-		(cd $(DIST_DIR)/legacy && zip -r "../../$(UUID).zip" .) ; \
+		(cd $(DIST_DIR) && zip -r "../$(UUID).zip" .) ; \
 	fi
 	@echo "✔ Created $(UUID).zip (GNOME Shell 42.9)"
 
 # Check JavaScript syntax across compiled source files (if node is available)
 check:
-	@if [ -n "$(NODE)" ] && [ -d "$(DIST_DIR)/legacy" ]; then \
+	@if [ -n "$(NODE)" ] && [ -d "$(DIST_DIR)" ]; then \
 		echo " 🔍 Checking compiled JS syntax for GNOME 42.9..."; \
-		for f in $(DIST_DIR)/legacy/*.js; do \
+		for f in $(DIST_DIR)/*.js; do \
 			[ -f "$$f" ] && $(NODE) -c "$$f" || exit 1; \
 		done; \
 		echo "✔ Compiled JS files passed syntax check!"; \
@@ -124,14 +121,14 @@ logs:
 	@echo " 📜 Tailing live SalatExtension logs (Ctrl+C to stop)..."
 	@journalctl -f -o cat /usr/bin/gnome-shell | grep --line-buffered -i "SalatExtension"
 
-# Clean build artifacts (preserves dist/legacy so install works without TS)
+# Clean build artifacts (preserves dist/ so install works without TS)
 clean:
-	@rm -rf $(DIST_DIR)/esm *.zip
+	@rm -rf .build-tmp *.zip
 	@echo "✔ Cleaned transient build artifacts."
 
 # Full clean including dist/
 distclean:
-	@rm -rf $(DIST_DIR) *.zip
+	@rm -rf $(DIST_DIR) .build-tmp *.zip
 	@echo "✔ Cleaned all build artifacts and dist directory."
 
 help:

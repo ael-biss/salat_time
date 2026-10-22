@@ -213,7 +213,300 @@ export default class SalatPreferences extends ExtensionPreferences {
         adhanGroup.add(audioPathRow);
         prefsPage.add(adhanGroup);
 
-        // 4. Lock Screen Group
+        // 4. Du'aa After Adhan Group
+        let duaaGroup = new Adw.PreferencesGroup();
+
+        let duaaSwitchRow = new Adw.ActionRow();
+        let duaaSwitch = new Gtk.Switch({
+            valign: Gtk.Align.CENTER,
+            active: config.duaaAfterAdhan !== false
+        });
+        duaaSwitch.connect('notify::active', (widget: any) => {
+            config.duaaAfterAdhan = widget.get_active();
+            Config.saveConfig(config);
+        });
+        duaaSwitchRow.add_suffix(duaaSwitch);
+        duaaSwitchRow.activatable_widget = duaaSwitch;
+        duaaGroup.add(duaaSwitchRow);
+
+        let duaaAudioRow = new Adw.ActionRow();
+        let duaaAudioEntry = new Gtk.Entry({
+            valign: Gtk.Align.CENTER,
+            hexpand: true,
+            text: config.duaaAudioPath || '',
+            placeholder_text: 'Optional custom audio file'
+        });
+        duaaAudioEntry.connect('changed', (widget: any) => {
+            config.duaaAudioPath = widget.get_text();
+            Config.saveConfig(config);
+        });
+        duaaAudioRow.add_suffix(duaaAudioEntry);
+
+        let duaaBrowseBtn = new Gtk.Button({
+            label: I18n.t('prefs_adhan_browse', config.lang),
+            valign: Gtk.Align.CENTER,
+            margin_start: 6
+        });
+        duaaBrowseBtn.connect('clicked', () => {
+            try {
+                let fileChooser = new Gtk.FileChooserNative({
+                    title: I18n.t('prefs_duaa_title', config.lang),
+                    transient_for: window,
+                    action: Gtk.FileChooserAction.OPEN
+                });
+                let filter = new Gtk.FileFilter();
+                filter.set_name('Audio Files (*.mp3, *.wav, *.ogg)');
+                filter.add_mime_type('audio/*');
+                filter.add_pattern('*.mp3');
+                filter.add_pattern('*.wav');
+                filter.add_pattern('*.ogg');
+                fileChooser.add_filter(filter);
+
+                fileChooser.connect('response', (dialog: any, response_id: number) => {
+                    if (response_id === Gtk.ResponseType.ACCEPT) {
+                        let file = dialog.get_file();
+                        if (file) {
+                            let path = file.get_path();
+                            duaaAudioEntry.set_text(path);
+                            config.duaaAudioPath = path;
+                            Config.saveConfig(config);
+                        }
+                    }
+                    dialog.destroy();
+                });
+                fileChooser.show();
+            } catch (e: any) {
+                log('[SalatExtension Prefs] Du\'aa file chooser error: ' + e.message);
+            }
+        });
+        duaaAudioRow.add_suffix(duaaBrowseBtn);
+
+        let duaaTestBtn = new Gtk.Button({
+            label: I18n.t('prefs_adhan_test', config.lang),
+            valign: Gtk.Align.CENTER,
+            margin_start: 6
+        });
+        duaaTestBtn.connect('clicked', () => {
+            let path = duaaAudioEntry.get_text().trim();
+            if (path.startsWith('~')) path = GLib.get_home_dir() + path.slice(1);
+            if (path && GLib.file_test(path, GLib.FileTest.EXISTS)) {
+                playAudioPreview(path);
+            } else {
+                log('[SalatExtension Prefs] Du\'aa audio not found: ' + path);
+            }
+        });
+        duaaAudioRow.add_suffix(duaaTestBtn);
+
+        let duaaResetBtn = new Gtk.Button({
+            label: I18n.t('prefs_adhan_reset', config.lang),
+            valign: Gtk.Align.CENTER,
+            margin_start: 6
+        });
+        duaaResetBtn.connect('clicked', () => {
+            duaaAudioEntry.set_text('');
+            config.duaaAudioPath = '';
+            Config.saveConfig(config);
+        });
+        duaaAudioRow.add_suffix(duaaResetBtn);
+
+        duaaGroup.add(duaaAudioRow);
+        prefsPage.add(duaaGroup);
+
+        // 5. Friday Jumuaah Reminder Group
+        let fridayGroup = new Adw.PreferencesGroup();
+
+        let fridaySwitchRow = new Adw.ActionRow();
+        let fridaySwitch = new Gtk.Switch({
+            valign: Gtk.Align.CENTER,
+            active: config.fridayReminderEnabled !== false
+        });
+        fridaySwitch.connect('notify::active', (widget: any) => {
+            config.fridayReminderEnabled = widget.get_active();
+            Config.saveConfig(config);
+        });
+        fridaySwitchRow.add_suffix(fridaySwitch);
+        fridaySwitchRow.activatable_widget = fridaySwitch;
+        fridayGroup.add(fridaySwitchRow);
+
+        let fridayAdj = new Gtk.Adjustment({
+            value: config.fridayReminderMinutes || 60,
+            lower: 15, upper: 180,
+            step_increment: 5, page_increment: 15
+        });
+
+        let fridayTimeRow: any;
+        if (Adw.SpinRow) {
+            fridayTimeRow = new Adw.SpinRow({
+                subtitle: 'Minutes before Dhuhr',
+                adjustment: fridayAdj,
+                value: config.fridayReminderMinutes || 60
+            });
+            fridayTimeRow.connect('notify::value', (widget: any) => {
+                let v = widget.get_value();
+                if (v >= 15) {
+                    config.fridayReminderMinutes = v;
+                    Config.saveConfig(config);
+                }
+            });
+        } else {
+            fridayTimeRow = new Adw.ActionRow({
+                subtitle: 'Minutes before Dhuhr'
+            });
+            let spin = Gtk.SpinButton.new(fridayAdj, 5, 0);
+            spin.valign = Gtk.Align.CENTER;
+            spin.set_value(config.fridayReminderMinutes || 60);
+            spin.connect('value-changed', (widget: any) => {
+                let v = widget.get_value_as_int();
+                if (v >= 15) {
+                    config.fridayReminderMinutes = v;
+                    Config.saveConfig(config);
+                }
+            });
+            fridayTimeRow.add_suffix(spin);
+            fridayTimeRow.activatable_widget = spin;
+        }
+        fridayGroup.add(fridayTimeRow);
+        prefsPage.add(fridayGroup);
+
+        // 6. Wudu Reminder Group
+        let wuduGroup = new Adw.PreferencesGroup();
+
+        let wuduSwitchRow = new Adw.ActionRow();
+        let wuduSwitch = new Gtk.Switch({
+            valign: Gtk.Align.CENTER,
+            active: config.wuduReminderEnabled !== false
+        });
+        wuduSwitch.connect('notify::active', (widget: any) => {
+            config.wuduReminderEnabled = widget.get_active();
+            Config.saveConfig(config);
+        });
+        wuduSwitchRow.add_suffix(wuduSwitch);
+        wuduSwitchRow.activatable_widget = wuduSwitch;
+        wuduGroup.add(wuduSwitchRow);
+
+        let wuduAdj = new Gtk.Adjustment({
+            value: config.wuduReminderMinutes || 15,
+            lower: 1, upper: 60,
+            step_increment: 1, page_increment: 5
+        });
+
+        let wuduTimeRow: any;
+        if (Adw.SpinRow) {
+            wuduTimeRow = new Adw.SpinRow({
+                subtitle: 'Minutes before Adhan',
+                adjustment: wuduAdj,
+                value: config.wuduReminderMinutes || 15
+            });
+            wuduTimeRow.connect('notify::value', (widget: any) => {
+                let v = widget.get_value();
+                if (v >= 1) {
+                    config.wuduReminderMinutes = v;
+                    Config.saveConfig(config);
+                }
+            });
+        } else {
+            wuduTimeRow = new Adw.ActionRow({
+                subtitle: 'Minutes before Adhan'
+            });
+            let spin = Gtk.SpinButton.new(wuduAdj, 1, 0);
+            spin.valign = Gtk.Align.CENTER;
+            spin.set_value(config.wuduReminderMinutes || 15);
+            spin.connect('value-changed', (widget: any) => {
+                let v = widget.get_value_as_int();
+                if (v >= 1) {
+                    config.wuduReminderMinutes = v;
+                    Config.saveConfig(config);
+                }
+            });
+            wuduTimeRow.add_suffix(spin);
+            wuduTimeRow.activatable_widget = spin;
+        }
+        wuduGroup.add(wuduTimeRow);
+
+        let wuduAudioRow = new Adw.ActionRow();
+        let wuduAudioEntry = new Gtk.Entry({
+            valign: Gtk.Align.CENTER,
+            hexpand: true,
+            text: config.wuduAudioPath || '',
+            placeholder_text: 'Optional custom audio chime'
+        });
+        wuduAudioEntry.connect('changed', (widget: any) => {
+            config.wuduAudioPath = widget.get_text();
+            Config.saveConfig(config);
+        });
+        wuduAudioRow.add_suffix(wuduAudioEntry);
+
+        let wuduBrowseBtn = new Gtk.Button({
+            label: I18n.t('prefs_adhan_browse', config.lang),
+            valign: Gtk.Align.CENTER,
+            margin_start: 6
+        });
+        wuduBrowseBtn.connect('clicked', () => {
+            try {
+                let fileChooser = new Gtk.FileChooserNative({
+                    title: I18n.t('prefs_wudu_title', config.lang),
+                    transient_for: window,
+                    action: Gtk.FileChooserAction.OPEN
+                });
+                let filter = new Gtk.FileFilter();
+                filter.set_name('Audio Files (*.mp3, *.wav, *.ogg)');
+                filter.add_mime_type('audio/*');
+                filter.add_pattern('*.mp3');
+                filter.add_pattern('*.wav');
+                filter.add_pattern('*.ogg');
+                fileChooser.add_filter(filter);
+
+                fileChooser.connect('response', (dialog: any, response_id: number) => {
+                    if (response_id === Gtk.ResponseType.ACCEPT) {
+                        let file = dialog.get_file();
+                        if (file) {
+                            let path = file.get_path();
+                            wuduAudioEntry.set_text(path);
+                            config.wuduAudioPath = path;
+                            Config.saveConfig(config);
+                        }
+                    }
+                    dialog.destroy();
+                });
+                fileChooser.show();
+            } catch (e: any) {
+                log('[SalatExtension Prefs] Wudu file chooser error: ' + e.message);
+            }
+        });
+        wuduAudioRow.add_suffix(wuduBrowseBtn);
+
+        let wuduTestBtn = new Gtk.Button({
+            label: I18n.t('prefs_adhan_test', config.lang),
+            valign: Gtk.Align.CENTER,
+            margin_start: 6
+        });
+        wuduTestBtn.connect('clicked', () => {
+            let path = wuduAudioEntry.get_text().trim();
+            if (path.startsWith('~')) path = GLib.get_home_dir() + path.slice(1);
+            if (path && GLib.file_test(path, GLib.FileTest.EXISTS)) {
+                playAudioPreview(path);
+            } else {
+                log('[SalatExtension Prefs] Wudu audio not found: ' + path);
+            }
+        });
+        wuduAudioRow.add_suffix(wuduTestBtn);
+
+        let wuduResetBtn = new Gtk.Button({
+            label: I18n.t('prefs_adhan_reset', config.lang),
+            valign: Gtk.Align.CENTER,
+            margin_start: 6
+        });
+        wuduResetBtn.connect('clicked', () => {
+            wuduAudioEntry.set_text('');
+            config.wuduAudioPath = '';
+            Config.saveConfig(config);
+        });
+        wuduAudioRow.add_suffix(wuduResetBtn);
+
+        wuduGroup.add(wuduAudioRow);
+        prefsPage.add(wuduGroup);
+
+        // 7. Lock Screen Group
         let lockGroup = new Adw.PreferencesGroup();
 
         let lockSwitchRow = new Adw.ActionRow();
@@ -245,7 +538,7 @@ export default class SalatPreferences extends ExtensionPreferences {
 
         prefsPage.add(lockGroup);
 
-        // 5. Save & Apply Actions Group
+        // 7. Save & Apply Actions Group
         let actionsGroup = new Adw.PreferencesGroup();
 
         let actionRow = new Adw.ActionRow();
@@ -296,6 +589,33 @@ export default class SalatPreferences extends ExtensionPreferences {
             testBtn.set_label(I18n.t('prefs_adhan_test', lang));
             resetBtn.set_label(I18n.t('prefs_adhan_reset', lang));
 
+            duaaGroup.set_title(GLib.markup_escape_text(I18n.t('prefs_duaa_title', lang), -1));
+            duaaGroup.set_description(I18n.t('prefs_duaa_desc', lang));
+            duaaSwitchRow.set_title(I18n.t('prefs_duaa_enable', lang));
+            duaaSwitchRow.set_subtitle(I18n.t('prefs_duaa_enable_sub', lang));
+            duaaAudioRow.set_title(I18n.t('prefs_duaa_audio', lang));
+            duaaAudioRow.set_subtitle(I18n.t('prefs_duaa_audio_sub', lang));
+            duaaBrowseBtn.set_label(I18n.t('prefs_adhan_browse', lang));
+            duaaTestBtn.set_label(I18n.t('prefs_adhan_test', lang));
+            duaaResetBtn.set_label(I18n.t('prefs_adhan_reset', lang));
+
+            fridayGroup.set_title(GLib.markup_escape_text(I18n.t('prefs_friday_title', lang), -1));
+            fridayGroup.set_description(I18n.t('prefs_friday_desc', lang));
+            fridaySwitchRow.set_title(I18n.t('prefs_friday_enable', lang));
+            fridaySwitchRow.set_subtitle(I18n.t('prefs_friday_enable_sub', lang));
+            fridayTimeRow.set_title(I18n.t('prefs_friday_time', lang));
+
+            wuduGroup.set_title(GLib.markup_escape_text(I18n.t('prefs_wudu_title', lang), -1));
+            wuduGroup.set_description(I18n.t('prefs_wudu_desc', lang));
+            wuduSwitchRow.set_title(I18n.t('prefs_wudu_enable', lang));
+            wuduSwitchRow.set_subtitle(I18n.t('prefs_wudu_enable_sub', lang));
+            wuduTimeRow.set_title(I18n.t('prefs_wudu_time', lang));
+            wuduAudioRow.set_title(I18n.t('prefs_wudu_audio', lang));
+            wuduAudioRow.set_subtitle(I18n.t('prefs_wudu_audio_sub', lang));
+            wuduBrowseBtn.set_label(I18n.t('prefs_adhan_browse', lang));
+            wuduTestBtn.set_label(I18n.t('prefs_adhan_test', lang));
+            wuduResetBtn.set_label(I18n.t('prefs_adhan_reset', lang));
+
             lockGroup.set_title(GLib.markup_escape_text(I18n.t('prefs_lock_title', lang), -1));
             lockGroup.set_description(I18n.t('prefs_lock_desc', lang));
             lockSwitchRow.set_title(I18n.t('prefs_lock_enable', lang));
@@ -320,7 +640,7 @@ export default class SalatPreferences extends ExtensionPreferences {
             }
         });
 
-        // Initial translation pass
+        // Initial translation pass and cache status
         updatePrefsText();
 
         window.add(prefsPage);

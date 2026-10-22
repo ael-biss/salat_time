@@ -10,7 +10,14 @@ export function loadConfig(): UserConfig {
         iqamaDelays: Object.assign({}, Constants.DEFAULT_IQAMA_DELAYS),
         lockEnabled: false,
         customLockCommand: '',
-        adhanAudioPath: ''
+        adhanAudioPath: '',
+        duaaAfterAdhan: true,
+        duaaAudioPath: '',
+        fridayReminderEnabled: true,
+        fridayReminderMinutes: 60,
+        wuduReminderEnabled: true,
+        wuduReminderMinutes: 15,
+        wuduAudioPath: ''
     };
     try {
         if (!GLib.file_test(Constants.CONFIG_FILE, GLib.FileTest.EXISTS)) return config;
@@ -40,17 +47,48 @@ export function loadConfig(): UserConfig {
         if (typeof parsed.adhanAudioPath === 'string') {
             config.adhanAudioPath = parsed.adhanAudioPath;
         }
+        if (parsed.duaaAfterAdhan !== undefined) {
+            config.duaaAfterAdhan = Boolean(parsed.duaaAfterAdhan);
+        }
+        if (typeof parsed.duaaAudioPath === 'string') {
+            config.duaaAudioPath = parsed.duaaAudioPath;
+        }
+        if (parsed.fridayReminderEnabled !== undefined) {
+            config.fridayReminderEnabled = Boolean(parsed.fridayReminderEnabled);
+        }
+        if (parsed.fridayReminderMinutes !== undefined) {
+            let m = Number(parsed.fridayReminderMinutes);
+            config.fridayReminderMinutes = (!isNaN(m) && m >= 5 && m <= 240) ? m : 60;
+        }
+        if (parsed.wuduReminderEnabled !== undefined) {
+            config.wuduReminderEnabled = Boolean(parsed.wuduReminderEnabled);
+        }
+        if (parsed.wuduReminderMinutes !== undefined) {
+            let m = Number(parsed.wuduReminderMinutes);
+            config.wuduReminderMinutes = (!isNaN(m) && m >= 1 && m <= 120) ? m : 15;
+        }
+        if (typeof parsed.wuduAudioPath === 'string') {
+            config.wuduAudioPath = parsed.wuduAudioPath;
+        }
     } catch (e: any) {
         log('[SalatExtension Config] Load error: ' + e.message);
     }
     return config;
 }
 
+function securePermissions(path: string, mode: number): void {
+    try {
+        let f = Gio.File.new_for_path(path);
+        f.set_attribute_uint32(Gio.FILE_ATTRIBUTE_UNIX_MODE, mode, Gio.FileQueryInfoFlags.NONE, null);
+    } catch (e: any) {}
+}
+
 export function saveConfig(config: UserConfig): void {
     try {
         if (!GLib.file_test(Constants.CONFIG_DIR, GLib.FileTest.EXISTS)) {
-            GLib.mkdir_with_parents(Constants.CONFIG_DIR, 0o755);
+            GLib.mkdir_with_parents(Constants.CONFIG_DIR, 0o700);
         }
+        securePermissions(Constants.CONFIG_DIR, 0o700);
         let data = JSON.stringify({
             cityId: config.city.id,
             cityName: config.city.name,
@@ -58,9 +96,17 @@ export function saveConfig(config: UserConfig): void {
             iqamaDelays: config.iqamaDelays,
             lockEnabled: config.lockEnabled ?? false,
             customLockCommand: config.customLockCommand ?? '',
-            adhanAudioPath: config.adhanAudioPath ?? ''
+            adhanAudioPath: config.adhanAudioPath ?? '',
+            duaaAfterAdhan: config.duaaAfterAdhan ?? true,
+            duaaAudioPath: config.duaaAudioPath ?? '',
+            fridayReminderEnabled: config.fridayReminderEnabled ?? true,
+            fridayReminderMinutes: config.fridayReminderMinutes ?? 60,
+            wuduReminderEnabled: config.wuduReminderEnabled ?? true,
+            wuduReminderMinutes: config.wuduReminderMinutes ?? 15,
+            wuduAudioPath: config.wuduAudioPath ?? ''
         }, null, 2);
         GLib.file_set_contents(Constants.CONFIG_FILE, new TextEncoder().encode(data));
+        securePermissions(Constants.CONFIG_FILE, 0o600);
         log('[SalatExtension Config] Saved config successfully to ' + Constants.CONFIG_FILE);
     } catch (e: any) {
         log('[SalatExtension Config] Save error: ' + e.message);
@@ -70,15 +116,17 @@ export function saveConfig(config: UserConfig): void {
 export function setupConfigMonitor(onConfigChanged: () => void): any {
     try {
         if (!GLib.file_test(Constants.CONFIG_DIR, GLib.FileTest.EXISTS)) {
-            GLib.mkdir_with_parents(Constants.CONFIG_DIR, 0o755);
+            GLib.mkdir_with_parents(Constants.CONFIG_DIR, 0o700);
         }
+        securePermissions(Constants.CONFIG_DIR, 0o700);
         let dir = Gio.File.new_for_path(Constants.CONFIG_DIR);
         let monitor = dir.monitor_directory(Gio.FileMonitorFlags.NONE, null);
         monitor.connect('changed', (_mon: any, file: any, otherFile: any, eventType: any) => {
             let fName = file ? file.get_basename() : '';
             let oName = otherFile ? otherFile.get_basename() : '';
-            log(`[SalatExtension Config] Directory monitor event: file=${fName}, otherFile=${oName}, event=${eventType}`);
-            if (fName.includes('config') || oName.includes('config') || eventType === Gio.FileMonitorEvent.CHANGES_DONE_HINT || eventType === Gio.FileMonitorEvent.CREATED) {
+            let isConfigFile = (fName && fName.startsWith('config.')) || (oName && oName.startsWith('config.'));
+            if (isConfigFile && (eventType === Gio.FileMonitorEvent.CHANGES_DONE_HINT || eventType === Gio.FileMonitorEvent.CREATED || eventType === Gio.FileMonitorEvent.CHANGED)) {
+                log(`[SalatExtension Config] Config file changed on disk: file=${fName}, otherFile=${oName}`);
                 onConfigChanged();
             }
         });

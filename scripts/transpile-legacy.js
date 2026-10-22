@@ -1,14 +1,14 @@
 const fs = require('fs');
 const path = require('path');
 
-const esmDir = path.join(__dirname, '..', 'dist', 'esm');
-const legacyDir = path.join(__dirname, '..', 'dist', 'legacy');
+const tmpDir = path.join(__dirname, '..', '.build-tmp');
+const distDir = path.join(__dirname, '..', 'dist');
 
-if (!fs.existsSync(legacyDir)) {
-    fs.mkdirSync(legacyDir, { recursive: true });
+if (!fs.existsSync(distDir)) {
+    fs.mkdirSync(distDir, { recursive: true });
 }
 
-console.log(' 🔄 Transpiling ESM build to Legacy GJS format (GNOME 42-44)...');
+console.log(' 🔄 Transpiling to GNOME 42.9 format in dist/...');
 
 // Helper to convert ESM code to Legacy GJS format
 function transpileModule(filename, code) {
@@ -65,6 +65,8 @@ let configMonitor = null;
 let prayerTimesData = null;
 let triggeredAdhans = {};
 let triggeredIqamas = {};
+let triggeredFridayReminders = {};
+let triggeredWuduReminders = {};
 
 function _getModules() {
     const Me = ExtensionUtils.getCurrentExtension();
@@ -259,10 +261,8 @@ function runFtLock() {
             GLib.spawn_command_line_async('/usr/share/42/ft_lock');
         } else if (GLib.file_test('/usr/local/bin/ft_lock', GLib.FileTest.IS_EXECUTABLE)) {
             GLib.spawn_command_line_async('/usr/local/bin/ft_lock');
-        } else if (GLib.find_program_in_path('loginctl')) {
-            GLib.spawn_command_line_async('loginctl lock-session');
-        } else if (GLib.find_program_in_path('gnome-screensaver-command')) {
-            GLib.spawn_command_line_async('gnome-screensaver-command -l');
+        } else {
+            log('[SalatExtension Legacy] ft_lock executable not found on system.');
         }
     } catch (e) {
         log('[SalatExtension Legacy] Error executing lock: ' + e.message);
@@ -285,12 +285,33 @@ function checkPrayerEvents(now) {
     for (let p of prayers) {
         const adhanKey = datePrefix + '_' + p.key + '_adhan';
         const iqamaKey = datePrefix + '_' + p.key + '_iqama';
+        const wuduKey = datePrefix + '_' + p.key + '_wudu';
+
+        if (config.wuduReminderEnabled !== false) {
+            const wuduMins = config.wuduReminderMinutes !== undefined ? config.wuduReminderMinutes : 15;
+            const wuduTime = new Date(p.adhanDate.getTime() - wuduMins * 60000);
+            const wuduDiff = now.getTime() - wuduTime.getTime();
+
+            if (wuduDiff >= 0 && !triggeredWuduReminders[wuduKey]) {
+                triggeredWuduReminders[wuduKey] = true;
+                if (wuduDiff <= 60000) {
+                    triggerWuduReminder(p.name, wuduMins);
+                }
+            }
+        }
 
         const adhanDiff = now.getTime() - p.adhanDate.getTime();
         if (adhanDiff >= 0 && !triggeredAdhans[adhanKey]) {
             triggeredAdhans[adhanKey] = true;
             if (adhanDiff <= 30000) {
                 playAdhanSound();
+
+                if (config.duaaAfterAdhan !== false) {
+                    GLib.timeout_add_seconds(GLib.PRIORITY_DEFAULT, 15, () => {
+                        showDuaaAfterAdhan();
+                        return GLib.SOURCE_REMOVE;
+                    });
+                }
             }
         }
 
@@ -307,6 +328,115 @@ function checkPrayerEvents(now) {
                 }
             }
         }
+    }
+
+    if (now.getDay() === 5 && config.fridayReminderEnabled !== false) {
+        const dhuhr = prayers.find((pr) => pr.key === 'Dhuhr');
+        if (dhuhr) {
+            const reminderMins = config.fridayReminderMinutes !== undefined ? config.fridayReminderMinutes : 60;
+            const reminderTime = new Date(dhuhr.adhanDate.getTime() - reminderMins * 60000);
+            const fridayDiff = now.getTime() - reminderTime.getTime();
+            const fridayKey = datePrefix + '_friday_reminder';
+
+            if (fridayDiff >= 0 && !triggeredFridayReminders[fridayKey]) {
+                triggeredFridayReminders[fridayKey] = true;
+                if (fridayDiff <= 60000) {
+                    triggerFridayReminder(reminderMins);
+                }
+            }
+        }
+    }
+}
+
+function showDuaaAfterAdhan() {
+    log("[SalatExtension Legacy] 🤲 Showing Du'aa after Adhan...");
+    const { I18n } = _getModules();
+    const lang = config ? config.lang : 'auto';
+    const title = I18n.t('duaa_title', lang);
+    let body = I18n.t('duaa_text', lang);
+    if (lang === 'en') {
+        body += "\\n\\nO Allah, Lord of this perfect call and established prayer, grant Muhammad the intercession and distinction, and resurrect him to the praised position You have promised him.";
+    } else if (lang === 'fr') {
+        body += "\\n\\nÔ Allah, Seigneur de cet appel parfait et de la prière établie, accorde à Muhammad l'intercession et l'éminence, et ressuscite-le au rang louable que Tu lui as promis.";
+    }
+
+    try {
+        const safeTitle = title.replace(/"/g, '\\\\"');
+        const safeBody = body.replace(/"/g, '\\\\"');
+        GLib.spawn_command_line_async('notify-send -u normal "' + safeTitle + '" "' + safeBody + '"');
+    } catch (e) {
+        log("[SalatExtension Legacy] Error sending Du'aa notification: " + e.message);
+    }
+
+    if (config && config.duaaAudioPath && config.duaaAudioPath.trim().length > 0) {
+        let audio = config.duaaAudioPath.trim();
+        if (audio.startsWith('~')) audio = GLib.get_home_dir() + audio.slice(1);
+        if (GLib.file_test(audio, GLib.FileTest.EXISTS)) {
+            playAudioFile(audio);
+        }
+    }
+}
+
+function triggerFridayReminder(minutes) {
+    log('[SalatExtension Legacy] 🕌 Triggering Friday Jumuaah reminder (' + minutes + 'm before Dhuhr)...');
+    const { I18n } = _getModules();
+    const lang = config ? config.lang : 'auto';
+    const title = I18n.t('friday_reminder_title', lang);
+    const body = I18n.t('friday_reminder_body', lang, { minutes: minutes });
+    try {
+        const safeTitle = title.replace(/"/g, '\\\\"');
+        const safeBody = body.replace(/"/g, '\\\\"');
+        GLib.spawn_command_line_async('notify-send -u critical "' + safeTitle + '" "' + safeBody + '"');
+    } catch (e) {
+        log('[SalatExtension Legacy] Error sending Friday reminder: ' + e.message);
+    }
+}
+
+function triggerWuduReminder(prayerName, minutes) {
+    log("[SalatExtension Legacy] 💧 Triggering Wudu reminder for " + prayerName + " (" + minutes + "m before Adhan)...");
+    const { I18n } = _getModules();
+    const lang = config ? config.lang : 'auto';
+    const title = I18n.t('wudu_reminder_title', lang);
+    const body = I18n.t('wudu_reminder_body', lang, { prayer: prayerName, minutes: minutes });
+    try {
+        const safeTitle = title.replace(/"/g, '\\\\"');
+        const safeBody = body.replace(/"/g, '\\\\"');
+        GLib.spawn_command_line_async('notify-send -u normal "' + safeTitle + '" "' + safeBody + '"');
+    } catch (e) {
+        log("[SalatExtension Legacy] Error sending Wudu reminder: " + e.message);
+    }
+
+    if (config && config.wuduAudioPath && config.wuduAudioPath.trim().length > 0) {
+        let audio = config.wuduAudioPath.trim();
+        if (audio.startsWith('~')) audio = GLib.get_home_dir() + audio.slice(1);
+        if (GLib.file_test(audio, GLib.FileTest.EXISTS)) {
+            playAudioFile(audio);
+            return;
+        }
+    }
+
+    try {
+        if (GLib.find_program_in_path('canberra-gtk-play')) {
+            GLib.spawn_command_line_async('canberra-gtk-play -i message-new-instant');
+        }
+    } catch (e) {}
+}
+
+function playAudioFile(audioPath) {
+    if (!audioPath || !GLib.file_test(audioPath, GLib.FileTest.EXISTS)) return;
+    try {
+        if (GLib.find_program_in_path('cvlc')) {
+            GLib.spawn_command_line_async('cvlc --play-and-exit --no-video "' + audioPath + '"');
+        } else if (GLib.find_program_in_path('pw-play')) {
+            GLib.spawn_command_line_async('pw-play "' + audioPath + '"');
+        } else if (GLib.find_program_in_path('paplay')) {
+            GLib.spawn_command_line_async('paplay "' + audioPath + '"');
+        } else {
+            const pyScript = 'import gi, sys; gi.require_version("Gst", "1.0"); from gi.repository import Gst, GLib; Gst.init(None); p = Gst.ElementFactory.make("playbin", "p"); p.set_property("uri", "file://" + sys.argv[1]); p.set_state(Gst.State.PLAYING); loop = GLib.MainLoop(); b = p.get_bus(); b.add_watch(GLib.PRIORITY_DEFAULT, lambda bus, msg: loop.quit() if msg.type in (Gst.MessageType.EOS, Gst.MessageType.ERROR) else True); loop.run()';
+            GLib.spawn_command_line_async('python3 -c "' + pyScript + '" "' + audioPath + '"');
+        }
+    } catch (e) {
+        log('[SalatExtension Legacy] Audio playback failed: ' + e.message);
     }
 }
 
@@ -441,7 +571,8 @@ function _getPrefsModules() {
     return {
         Constants: Me.imports.constants,
         Config: Me.imports.config,
-        I18n: Me.imports.i18n
+        I18n: Me.imports.i18n,
+        Api: Me.imports.api
     };
 }
 
@@ -474,7 +605,7 @@ function resolveDefaultAdhanPath() {
 function init(metadata) {}
 
 function buildPrefsWidget() {
-    const { Constants, Config, I18n } = _getPrefsModules();
+    const { Constants, Config, I18n, Api } = _getPrefsModules();
 
     let config = Config.loadConfig();
     let prefsPage = new Adw.PreferencesPage();
@@ -651,7 +782,298 @@ function buildPrefsWidget() {
     adhanGroup.add(audioPathRow);
     prefsPage.add(adhanGroup);
 
-    // 4. Lock Screen Group
+    // 4. Du'aa After Adhan Group
+    let duaaGroup = new Adw.PreferencesGroup();
+
+    let duaaSwitchRow = new Adw.ActionRow();
+    let duaaSwitch = new Gtk.Switch({
+        valign: Gtk.Align.CENTER,
+        active: config.duaaAfterAdhan !== false
+    });
+    duaaSwitch.connect('notify::active', (widget) => {
+        config.duaaAfterAdhan = widget.get_active();
+        Config.saveConfig(config);
+    });
+    duaaSwitchRow.add_suffix(duaaSwitch);
+    duaaSwitchRow.activatable_widget = duaaSwitch;
+    duaaGroup.add(duaaSwitchRow);
+
+    let duaaAudioRow = new Adw.ActionRow();
+    let duaaAudioEntry = new Gtk.Entry({
+        valign: Gtk.Align.CENTER,
+        hexpand: true,
+        text: config.duaaAudioPath || '',
+        placeholder_text: 'Optional custom audio file'
+    });
+    duaaAudioEntry.connect('changed', (widget) => {
+        config.duaaAudioPath = widget.get_text();
+        Config.saveConfig(config);
+    });
+    duaaAudioRow.add_suffix(duaaAudioEntry);
+
+    let duaaBrowseBtn = new Gtk.Button({
+        label: I18n.t('prefs_adhan_browse', config.lang),
+        valign: Gtk.Align.CENTER,
+        margin_start: 6
+    });
+    duaaBrowseBtn.connect('clicked', () => {
+        try {
+            let fileChooser = new Gtk.FileChooserNative({
+                title: I18n.t('prefs_duaa_title', config.lang),
+                action: Gtk.FileChooserAction.OPEN
+            });
+            let filter = new Gtk.FileFilter();
+            filter.set_name('Audio Files (*.mp3, *.wav, *.ogg)');
+            filter.add_mime_type('audio/*');
+            filter.add_pattern('*.mp3');
+            filter.add_pattern('*.wav');
+            filter.add_pattern('*.ogg');
+            fileChooser.add_filter(filter);
+
+            fileChooser.connect('response', (dialog, response_id) => {
+                if (response_id === Gtk.ResponseType.ACCEPT) {
+                    let file = dialog.get_file();
+                    if (file) {
+                        let path = file.get_path();
+                        duaaAudioEntry.set_text(path);
+                        config.duaaAudioPath = path;
+                        Config.saveConfig(config);
+                    }
+                }
+                dialog.destroy();
+            });
+            fileChooser.show();
+        } catch (e) {
+            log('[SalatExtension Prefs] Du\\'aa file chooser error: ' + e.message);
+        }
+    });
+    duaaAudioRow.add_suffix(duaaBrowseBtn);
+
+    let duaaTestBtn = new Gtk.Button({
+        label: I18n.t('prefs_adhan_test', config.lang),
+        valign: Gtk.Align.CENTER,
+        margin_start: 6
+    });
+    duaaTestBtn.connect('clicked', () => {
+        let path = duaaAudioEntry.get_text().trim();
+        if (path.startsWith('~')) path = GLib.get_home_dir() + path.slice(1);
+        if (path && GLib.file_test(path, GLib.FileTest.EXISTS)) {
+            playAudioPreview(path);
+        } else {
+            log('[SalatExtension Prefs] Du\\'aa audio not found: ' + path);
+        }
+    });
+    duaaAudioRow.add_suffix(duaaTestBtn);
+
+    let duaaResetBtn = new Gtk.Button({
+        label: I18n.t('prefs_adhan_reset', config.lang),
+        valign: Gtk.Align.CENTER,
+        margin_start: 6
+    });
+    duaaResetBtn.connect('clicked', () => {
+        duaaAudioEntry.set_text('');
+        config.duaaAudioPath = '';
+        Config.saveConfig(config);
+    });
+    duaaAudioRow.add_suffix(duaaResetBtn);
+
+    duaaGroup.add(duaaAudioRow);
+    prefsPage.add(duaaGroup);
+
+    // 5. Friday Jumuaah Reminder Group
+    let fridayGroup = new Adw.PreferencesGroup();
+
+    let fridaySwitchRow = new Adw.ActionRow();
+    let fridaySwitch = new Gtk.Switch({
+        valign: Gtk.Align.CENTER,
+        active: config.fridayReminderEnabled !== false
+    });
+    fridaySwitch.connect('notify::active', (widget) => {
+        config.fridayReminderEnabled = widget.get_active();
+        Config.saveConfig(config);
+    });
+    fridaySwitchRow.add_suffix(fridaySwitch);
+    fridaySwitchRow.activatable_widget = fridaySwitch;
+    fridayGroup.add(fridaySwitchRow);
+
+    let fridayAdj = new Gtk.Adjustment({
+        value: config.fridayReminderMinutes || 60,
+        lower: 15, upper: 180,
+        step_increment: 5, page_increment: 15
+    });
+
+    let fridayTimeRow;
+    if (Adw.SpinRow) {
+        fridayTimeRow = new Adw.SpinRow({
+            subtitle: 'Minutes before Dhuhr',
+            adjustment: fridayAdj,
+            value: config.fridayReminderMinutes || 60
+        });
+        fridayTimeRow.connect('notify::value', (widget) => {
+            let v = widget.get_value();
+            if (v >= 15) {
+                config.fridayReminderMinutes = v;
+                Config.saveConfig(config);
+            }
+        });
+    } else {
+        fridayTimeRow = new Adw.ActionRow({
+            subtitle: 'Minutes before Dhuhr'
+        });
+        let spin = Gtk.SpinButton.new(fridayAdj, 5, 0);
+        spin.valign = Gtk.Align.CENTER;
+        spin.set_value(config.fridayReminderMinutes || 60);
+        spin.connect('value-changed', (widget) => {
+            let v = widget.get_value_as_int();
+            if (v >= 15) {
+                config.fridayReminderMinutes = v;
+                Config.saveConfig(config);
+            }
+        });
+        fridayTimeRow.add_suffix(spin);
+        fridayTimeRow.activatable_widget = spin;
+    }
+    fridayGroup.add(fridayTimeRow);
+    prefsPage.add(fridayGroup);
+
+    // 6. Wudu Reminder Group
+    let wuduGroup = new Adw.PreferencesGroup();
+
+    let wuduSwitchRow = new Adw.ActionRow();
+    let wuduSwitch = new Gtk.Switch({
+        valign: Gtk.Align.CENTER,
+        active: config.wuduReminderEnabled !== false
+    });
+    wuduSwitch.connect('notify::active', (widget) => {
+        config.wuduReminderEnabled = widget.get_active();
+        Config.saveConfig(config);
+    });
+    wuduSwitchRow.add_suffix(wuduSwitch);
+    wuduSwitchRow.activatable_widget = wuduSwitch;
+    wuduGroup.add(wuduSwitchRow);
+
+    let wuduAdj = new Gtk.Adjustment({
+        value: config.wuduReminderMinutes || 15,
+        lower: 1, upper: 60,
+        step_increment: 1, page_increment: 5
+    });
+
+    let wuduTimeRow;
+    if (Adw.SpinRow) {
+        wuduTimeRow = new Adw.SpinRow({
+            subtitle: 'Minutes before Adhan',
+            adjustment: wuduAdj,
+            value: config.wuduReminderMinutes || 15
+        });
+        wuduTimeRow.connect('notify::value', (widget) => {
+            let v = widget.get_value();
+            if (v >= 1) {
+                config.wuduReminderMinutes = v;
+                Config.saveConfig(config);
+            }
+        });
+    } else {
+        wuduTimeRow = new Adw.ActionRow({
+            subtitle: 'Minutes before Adhan'
+        });
+        let spin = Gtk.SpinButton.new(wuduAdj, 1, 0);
+        spin.valign = Gtk.Align.CENTER;
+        spin.set_value(config.wuduReminderMinutes || 15);
+        spin.connect('value-changed', (widget) => {
+            let v = widget.get_value_as_int();
+            if (v >= 1) {
+                config.wuduReminderMinutes = v;
+                Config.saveConfig(config);
+            }
+        });
+        wuduTimeRow.add_suffix(spin);
+        wuduTimeRow.activatable_widget = spin;
+    }
+    wuduGroup.add(wuduTimeRow);
+
+    let wuduAudioRow = new Adw.ActionRow();
+    let wuduAudioEntry = new Gtk.Entry({
+        valign: Gtk.Align.CENTER,
+        hexpand: true,
+        text: config.wuduAudioPath || '',
+        placeholder_text: 'Optional custom audio chime'
+    });
+    wuduAudioEntry.connect('changed', (widget) => {
+        config.wuduAudioPath = widget.get_text();
+        Config.saveConfig(config);
+    });
+    wuduAudioRow.add_suffix(wuduAudioEntry);
+
+    let wuduBrowseBtn = new Gtk.Button({
+        label: I18n.t('prefs_adhan_browse', config.lang),
+        valign: Gtk.Align.CENTER,
+        margin_start: 6
+    });
+    wuduBrowseBtn.connect('clicked', () => {
+        try {
+            let fileChooser = new Gtk.FileChooserNative({
+                title: I18n.t('prefs_wudu_title', config.lang),
+                action: Gtk.FileChooserAction.OPEN
+            });
+            let filter = new Gtk.FileFilter();
+            filter.set_name('Audio Files (*.mp3, *.wav, *.ogg)');
+            filter.add_mime_type('audio/*');
+            filter.add_pattern('*.mp3');
+            filter.add_pattern('*.wav');
+            filter.add_pattern('*.ogg');
+            fileChooser.add_filter(filter);
+
+            fileChooser.connect('response', (dialog, response_id) => {
+                if (response_id === Gtk.ResponseType.ACCEPT) {
+                    let file = dialog.get_file();
+                    if (file) {
+                        let path = file.get_path();
+                        wuduAudioEntry.set_text(path);
+                        config.wuduAudioPath = path;
+                        Config.saveConfig(config);
+                    }
+                }
+                dialog.destroy();
+            });
+            fileChooser.show();
+        } catch (e) {
+            log("[SalatExtension Prefs] Wudu file chooser error: " + e.message);
+        }
+    });
+    wuduAudioRow.add_suffix(wuduBrowseBtn);
+
+    let wuduTestBtn = new Gtk.Button({
+        label: I18n.t('prefs_adhan_test', config.lang),
+        valign: Gtk.Align.CENTER,
+        margin_start: 6
+    });
+    wuduTestBtn.connect('clicked', () => {
+        let path = wuduAudioEntry.get_text().trim();
+        if (path.startsWith('~')) path = GLib.get_home_dir() + path.slice(1);
+        if (path && GLib.file_test(path, GLib.FileTest.EXISTS)) {
+            playAudioPreview(path);
+        } else {
+            log("[SalatExtension Prefs] Wudu audio not found: " + path);
+        }
+    });
+    wuduAudioRow.add_suffix(wuduTestBtn);
+
+    let wuduResetBtn = new Gtk.Button({
+        label: I18n.t('prefs_adhan_reset', config.lang),
+        valign: Gtk.Align.CENTER,
+        margin_start: 6
+    });
+    wuduResetBtn.connect('clicked', () => {
+        wuduAudioEntry.set_text('');
+        config.wuduAudioPath = '';
+        Config.saveConfig(config);
+    });
+    wuduAudioRow.add_suffix(wuduResetBtn);
+
+    wuduGroup.add(wuduAudioRow);
+    prefsPage.add(wuduGroup);
+
+    // 7. Lock Screen Group
     let lockGroup = new Adw.PreferencesGroup();
 
     let lockSwitchRow = new Adw.ActionRow();
@@ -683,7 +1105,7 @@ function buildPrefsWidget() {
 
     prefsPage.add(lockGroup);
 
-    // 5. Save & Apply Actions Group
+    // 7. Save & Apply Actions Group
     let actionsGroup = new Adw.PreferencesGroup();
     let actionRow = new Adw.ActionRow();
     let saveButton = new Gtk.Button({
@@ -730,6 +1152,33 @@ function buildPrefsWidget() {
         testBtn.set_label(I18n.t('prefs_adhan_test', lang));
         resetBtn.set_label(I18n.t('prefs_adhan_reset', lang));
 
+        duaaGroup.set_title(GLib.markup_escape_text(I18n.t('prefs_duaa_title', lang), -1));
+        duaaGroup.set_description(I18n.t('prefs_duaa_desc', lang));
+        duaaSwitchRow.set_title(I18n.t('prefs_duaa_enable', lang));
+        duaaSwitchRow.set_subtitle(I18n.t('prefs_duaa_enable_sub', lang));
+        duaaAudioRow.set_title(I18n.t('prefs_duaa_audio', lang));
+        duaaAudioRow.set_subtitle(I18n.t('prefs_duaa_audio_sub', lang));
+        duaaBrowseBtn.set_label(I18n.t('prefs_adhan_browse', lang));
+        duaaTestBtn.set_label(I18n.t('prefs_adhan_test', lang));
+        duaaResetBtn.set_label(I18n.t('prefs_adhan_reset', lang));
+
+        fridayGroup.set_title(GLib.markup_escape_text(I18n.t('prefs_friday_title', lang), -1));
+        fridayGroup.set_description(I18n.t('prefs_friday_desc', lang));
+        fridaySwitchRow.set_title(I18n.t('prefs_friday_enable', lang));
+        fridaySwitchRow.set_subtitle(I18n.t('prefs_friday_enable_sub', lang));
+        fridayTimeRow.set_title(I18n.t('prefs_friday_time', lang));
+
+        wuduGroup.set_title(GLib.markup_escape_text(I18n.t('prefs_wudu_title', lang), -1));
+        wuduGroup.set_description(I18n.t('prefs_wudu_desc', lang));
+        wuduSwitchRow.set_title(I18n.t('prefs_wudu_enable', lang));
+        wuduSwitchRow.set_subtitle(I18n.t('prefs_wudu_enable_sub', lang));
+        wuduTimeRow.set_title(I18n.t('prefs_wudu_time', lang));
+        wuduAudioRow.set_title(I18n.t('prefs_wudu_audio', lang));
+        wuduAudioRow.set_subtitle(I18n.t('prefs_wudu_audio_sub', lang));
+        wuduBrowseBtn.set_label(I18n.t('prefs_adhan_browse', lang));
+        wuduTestBtn.set_label(I18n.t('prefs_adhan_test', lang));
+        wuduResetBtn.set_label(I18n.t('prefs_adhan_reset', lang));
+
         lockGroup.set_title(GLib.markup_escape_text(I18n.t('prefs_lock_title', lang), -1));
         lockGroup.set_description(I18n.t('prefs_lock_desc', lang));
         lockSwitchRow.set_title(I18n.t('prefs_lock_enable', lang));
@@ -762,24 +1211,35 @@ function buildPrefsWidget() {
 }
 
 // Process files
-fs.readdirSync(esmDir).forEach((file) => {
-    const srcPath = path.join(esmDir, file);
-    const destPath = path.join(legacyDir, file);
+if (fs.existsSync(tmpDir)) {
+    fs.readdirSync(tmpDir).forEach((file) => {
+        const srcPath = path.join(tmpDir, file);
+        const destPath = path.join(distDir, file);
 
-    if (file.endsWith('.js')) {
-        const content = fs.readFileSync(srcPath, 'utf8');
-        const transpiled = transpileModule(file, content);
-        fs.writeFileSync(destPath, transpiled, 'utf8');
-        console.log(`  ✔ Transpiled ${file} -> dist/legacy/${file}`);
-    } else if (file === 'metadata.json') {
-        const meta = JSON.parse(fs.readFileSync(srcPath, 'utf8'));
-        meta['shell-version'] = ["42", "42.9"];
-        fs.writeFileSync(destPath, JSON.stringify(meta, null, 2), 'utf8');
-        console.log(`  ✔ Generated metadata.json for GNOME 42.9 -> dist/legacy/metadata.json`);
-    } else {
-        fs.copyFileSync(srcPath, destPath);
-        console.log(`  ✔ Copied ${file} -> dist/legacy/${file}`);
-    }
-});
+        if (file.endsWith('.js')) {
+            const content = fs.readFileSync(srcPath, 'utf8');
+            const transpiled = transpileModule(file, content);
+            fs.writeFileSync(destPath, transpiled, 'utf8');
+            console.log(`  ✔ Transpiled ${file} -> dist/${file}`);
+        } else if (file === 'metadata.json') {
+            const meta = JSON.parse(fs.readFileSync(srcPath, 'utf8'));
+            meta['shell-version'] = ["42", "42.9"];
+            fs.writeFileSync(destPath, JSON.stringify(meta, null, 2), 'utf8');
+            console.log(`  ✔ Generated metadata.json for GNOME 42.9 -> dist/metadata.json`);
+        } else {
+            fs.copyFileSync(srcPath, destPath);
+            console.log(`  ✔ Copied ${file} -> dist/${file}`);
+        }
+    });
 
-console.log('✔ Legacy transpilation complete!');
+    // Remove temporary directory
+    fs.rmSync(tmpDir, { recursive: true, force: true });
+}
+
+// Clean up old legacy/esm subdirectories if present in dist
+const oldLegacy = path.join(distDir, 'legacy');
+const oldEsm = path.join(distDir, 'esm');
+if (fs.existsSync(oldLegacy)) fs.rmSync(oldLegacy, { recursive: true, force: true });
+if (fs.existsSync(oldEsm)) fs.rmSync(oldEsm, { recursive: true, force: true });
+
+console.log('✔ Transpilation complete! GNOME 42.9 extension ready in dist/');
