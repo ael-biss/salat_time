@@ -13,6 +13,8 @@ let triggeredAdhans = {};
 let triggeredIqamas = {};
 let triggeredFridayReminders = {};
 let triggeredWuduReminders = {};
+let wuduDone = false;
+let lastWuduPrayerKey = '';
 
 function _getModules() {
     const Me = ExtensionUtils.getCurrentExtension();
@@ -42,7 +44,7 @@ function reloadAndSyncUI() {
         log('[SalatExtension Legacy] Syncing UI...');
         const { Constants, Config, UI } = _getModules();
         if (!config) return;
-        UI.updatePanelText(indicator, prayerTimesData, config.iqamaDelays, config.lang);
+        UI.updatePanelText(indicator, prayerTimesData, config.iqamaDelays, config.lang, wuduDone);
         UI.rebuildMenu(indicator, config, prayerTimesData, {
             onSelectCity: (city) => {
                 log('[SalatExtension Legacy] City selected: ' + city.name);
@@ -82,8 +84,14 @@ function reloadAndSyncUI() {
                     config.lockEnabled = enabled;
                     Config.saveConfig(config);
                 }
+            },
+            onQuickWudu: () => {
+                toggleQuickWudu();
+            },
+            onOpenScheduleWindow: () => {
+                openScheduleWindow();
             }
-        });
+        }, wuduDone);
         log('[SalatExtension Legacy] UI sync completed successfully.');
     } catch (e) {
         log('[SalatExtension Legacy] Error in reloadAndSyncUI: ' + e.message + '\n' + e.stack);
@@ -225,6 +233,14 @@ function checkPrayerEvents(now) {
         config.lang,
         now
     );
+
+    const active = Calculator.findActivePrayer(prayers, config.iqamaDelays, now);
+    if (active && wuduDone && lastWuduPrayerKey && active.prayer.key !== lastWuduPrayerKey) {
+        log('[SalatExtension Legacy] Prayer cycle transitioned (' + lastWuduPrayerKey + ' -> ' + active.prayer.key + '). Resetting Wudu mark.');
+        wuduDone = false;
+        lastWuduPrayerKey = '';
+        reloadAndSyncUI();
+    }
 
     const datePrefix = now.getFullYear() + '-' + (now.getMonth() + 1) + '-' + now.getDate();
 
@@ -368,21 +384,115 @@ function triggerWuduReminder(prayerName, minutes) {
     } catch (e) {}
 }
 
-function playAudioFile(audioPath) {
-    if (!audioPath || !GLib.file_test(audioPath, GLib.FileTest.EXISTS)) return;
+function getAudioPlayerScript() {
     try {
-        if (GLib.find_program_in_path('cvlc')) {
-            GLib.spawn_command_line_async('cvlc --play-and-exit --no-video "' + audioPath + '"');
-        } else if (GLib.find_program_in_path('pw-play')) {
-            GLib.spawn_command_line_async('pw-play "' + audioPath + '"');
-        } else if (GLib.find_program_in_path('paplay')) {
-            GLib.spawn_command_line_async('paplay "' + audioPath + '"');
-        } else {
-            const pyScript = 'import gi, sys; gi.require_version("Gst", "1.0"); from gi.repository import Gst, GLib; Gst.init(None); p = Gst.ElementFactory.make("playbin", "p"); p.set_property("uri", "file://" + sys.argv[1]); p.set_state(Gst.State.PLAYING); loop = GLib.MainLoop(); b = p.get_bus(); b.add_watch(GLib.PRIORITY_DEFAULT, lambda bus, msg: loop.quit() if msg.type in (Gst.MessageType.EOS, Gst.MessageType.ERROR) else True); loop.run()';
-            GLib.spawn_command_line_async('python3 -c "' + pyScript + '" "' + audioPath + '"');
+        let extPath = GLib.build_filenamev([GLib.get_home_dir(), '.local', 'share', 'gnome-shell', 'extensions', 'salat-timer@moroccan-habous', 'play_audio.py']);
+        if (GLib.file_test(extPath, GLib.FileTest.EXISTS)) return extPath;
+        let cur = GLib.build_filenamev([GLib.get_current_dir(), 'play_audio.py']);
+        if (GLib.file_test(cur, GLib.FileTest.EXISTS)) return cur;
+        let srcCur = GLib.build_filenamev([GLib.get_current_dir(), 'src', 'play_audio.py']);
+        if (GLib.file_test(srcCur, GLib.FileTest.EXISTS)) return srcCur;
+    } catch (e) {}
+    return null;
+}
+
+function playAudioFile(audioPath) {
+    if (!audioPath) return;
+    if (audioPath.startsWith('~')) {
+        audioPath = GLib.get_home_dir() + audioPath.slice(1);
+    }
+    if (!GLib.file_test(audioPath, GLib.FileTest.EXISTS)) {
+        log('[SalatExtension Legacy] Audio file not found: ' + audioPath);
+        return;
+    }
+
+    log('[SalatExtension Legacy] 🔊 Playing audio via robust helper: ' + audioPath);
+    try {
+        const script = getAudioPlayerScript();
+        if (script) {
+            GLib.spawn_command_line_async('python3 "' + script + '" "' + audioPath + '"');
+            return;
         }
+
+        const pyScript = 'import gi, sys, os; gi.require_version("Gst", "1.0"); from gi.repository import Gst, GLib; Gst.init(None); p = Gst.ElementFactory.make("playbin", "salat_player"); p.set_property("uri", GLib.filename_to_uri(os.path.abspath(sys.argv[1]), None)); p.set_state(Gst.State.PLAYING); loop = GLib.MainLoop(); b = p.get_bus(); b.add_watch(GLib.PRIORITY_DEFAULT, lambda bus, msg: loop.quit() if msg.type in (Gst.MessageType.EOS, Gst.MessageType.ERROR) else True); loop.run(); p.set_state(Gst.State.NULL)';
+        GLib.spawn_command_line_async('python3 -c "' + pyScript + '" "' + audioPath + '"');
     } catch (e) {
         log('[SalatExtension Legacy] Audio playback failed: ' + e.message);
+    }
+}
+
+function getScheduleWindowScript() {
+    try {
+        let extPath = GLib.build_filenamev([GLib.get_home_dir(), '.local', 'share', 'gnome-shell', 'extensions', 'salat-timer@moroccan-habous', 'schedule_window.py']);
+        if (GLib.file_test(extPath, GLib.FileTest.EXISTS)) return extPath;
+        let cur = GLib.build_filenamev([GLib.get_current_dir(), 'schedule_window.py']);
+        if (GLib.file_test(cur, GLib.FileTest.EXISTS)) return cur;
+        let srcCur = GLib.build_filenamev([GLib.get_current_dir(), 'src', 'schedule_window.py']);
+        if (GLib.file_test(srcCur, GLib.FileTest.EXISTS)) return srcCur;
+    } catch (e) {}
+    return null;
+}
+
+function openScheduleWindow() {
+    log('[SalatExtension Legacy] 📅 Launching dedicated monthly schedule window...');
+    try {
+        let script = getScheduleWindowScript();
+        if (script) {
+            GLib.spawn_command_line_async('python3 "' + script + '"');
+        } else {
+            GLib.spawn_command_line_async('python3 -m salat_schedule 2>/dev/null || gnome-extensions prefs salat-timer@moroccan-habous');
+        }
+    } catch (e) {
+        log('[SalatExtension Legacy] Failed to open schedule window: ' + e.message);
+    }
+}
+
+function toggleQuickWudu() {
+    const { Calculator, Constants, I18n } = _getModules();
+    const now = new Date();
+    const prayers = prayerTimesData && config
+        ? Calculator.getPrayerEntries(prayerTimesData, config.iqamaDelays, config.lang, now)
+        : [];
+    const active = Calculator.findActivePrayer(prayers, config ? config.iqamaDelays : Constants.DEFAULT_IQAMA_DELAYS, now);
+    const prayerName = active ? active.prayer.name : '';
+    const prayerKey = active ? active.prayer.key : '';
+
+    wuduDone = !wuduDone;
+    if (wuduDone) {
+        lastWuduPrayerKey = prayerKey;
+    } else {
+        lastWuduPrayerKey = '';
+    }
+
+    log('[SalatExtension Legacy] 💧 Quick Wudu toggled: done=' + wuduDone + ' for prayer=' + prayerName);
+    reloadAndSyncUI();
+
+    const lang = config ? config.lang : 'auto';
+    try {
+        if (wuduDone) {
+            const title = I18n.t('wudu_marked_title', lang);
+            const body = I18n.t('wudu_marked_body', lang, { prayer: prayerName });
+            GLib.spawn_command_line_async('notify-send -u normal "' + title.replace(/"/g, '\"') + '" "' + body.replace(/"/g, '\"') + '"');
+
+            if (config && config.wuduAudioPath && config.wuduAudioPath.trim().length > 0) {
+                let audio = config.wuduAudioPath.trim();
+                if (audio.startsWith('~')) audio = GLib.get_home_dir() + audio.slice(1);
+                if (GLib.file_test(audio, GLib.FileTest.EXISTS)) {
+                    playAudioFile(audio);
+                    return;
+                }
+            }
+
+            if (GLib.find_program_in_path('canberra-gtk-play')) {
+                GLib.spawn_command_line_async('canberra-gtk-play -i message-new-instant');
+            }
+        } else {
+            const title = I18n.t('wudu_cleared_title', lang);
+            const body = I18n.t('wudu_cleared_body', lang, { prayer: prayerName });
+            GLib.spawn_command_line_async('notify-send -u normal "' + title.replace(/"/g, '\"') + '" "' + body.replace(/"/g, '\"') + '"');
+        }
+    } catch (e) {
+        log('[SalatExtension Legacy] Error sending Wudu notification: ' + e.message);
     }
 }
 
@@ -469,7 +579,7 @@ function enable() {
             if (!prayerTimesData || (now.getHours() === 0 && now.getMinutes() === 0 && now.getSeconds() === 0)) {
                 refreshPrayerTimes();
             } else if (config) {
-                UI.updatePanelText(indicator, prayerTimesData, config.iqamaDelays, config.lang);
+                UI.updatePanelText(indicator, prayerTimesData, config.iqamaDelays, config.lang, wuduDone);
                 checkPrayerEvents(now);
             }
             return GLib.SOURCE_CONTINUE;

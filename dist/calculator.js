@@ -1,4 +1,3 @@
-
 var I18n = imports.misc.extensionUtils.getCurrentExtension().imports.i18n;
 function formatDiff(diffMs) {
     const totalSecs = Math.max(0, Math.floor(diffMs / 1000));

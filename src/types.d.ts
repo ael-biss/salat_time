@@ -49,6 +49,30 @@ interface UserConfig {
     wuduAudioPath?: string;
 }
 
+interface MonthlyScheduleDay {
+    date?: string;
+    day_ar: string;
+    hijri_day: string;
+    gregorian_day: number | string;
+    fajr: string;
+    sunrise: string;
+    dhuhr: string;
+    asr: string;
+    maghrib: string;
+    isha: string;
+    is_today?: boolean;
+}
+
+interface MonthlyScheduleData {
+    city: string;
+    city_label: string;
+    hijri_month: string;
+    gregorian_period: string;
+    days_count: number;
+    days: MonthlyScheduleDay[];
+    last_updated?: string;
+}
+
 interface MonthlyCacheData {
     cities: {
         [cityId: string]: {
@@ -57,6 +81,7 @@ interface MonthlyCacheData {
             };
         };
     };
+    monthlySchedule?: MonthlyScheduleData;
     lastSyncTimes?: {
         [key: string]: number;
     };

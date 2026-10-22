@@ -26,18 +26,21 @@ run: compile install
 compile-ts:
 	@echo " 🔨 Compiling TypeScript sources..."
 	@mkdir -p .build-tmp
-	@if [ -n "$(NODE)" ] && [ -f ./node_modules/.bin/tsc ]; then \
-		$(NODE) ./node_modules/.bin/tsc -p tsconfig.esm.json ; \
+	@if [ -f ./node_modules/typescript/lib/tsc.js ]; then \
+		node ./node_modules/typescript/lib/tsc.js -p tsconfig.esm.json ; \
 	elif command -v tsc >/dev/null 2>&1; then \
 		tsc -p tsconfig.esm.json ; \
-	elif [ -n "$(TSC_BIN)" ] && [ -n "$(NODE)" ]; then \
-		$(NODE) $(TSC_BIN) -p tsconfig.esm.json ; \
 	else \
 		npx tsc -p tsconfig.esm.json ; \
 	fi
 	@cp -f src/metadata.json .build-tmp/
 	@cp -f mosque_pic.svg .build-tmp/ 2>/dev/null || cp -f src/mosque_pic.svg .build-tmp/
 	@cp -f src/adan.mp3 .build-tmp/ 2>/dev/null || cp -f src/adan.mp3 .build-tmp/
+	@cp -f src/schedule_window.py .build-tmp/ 2>/dev/null || true
+	@chmod +x .build-tmp/schedule_window.py 2>/dev/null || true
+	@cp -f src/play_audio.py .build-tmp/ 2>/dev/null || true
+	@chmod +x .build-tmp/play_audio.py 2>/dev/null || true
+	@cp -f src/stylesheet.css .build-tmp/ 2>/dev/null || true
 	@echo "✔ TS compilation successful!"
 
 # Compile and generate extension for GNOME Shell 42.9 directly in dist/

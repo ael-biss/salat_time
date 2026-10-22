@@ -9,6 +9,7 @@
       --bg: #0f172a;
       --card-bg: #1e293b;
       --accent: #10b981;
+      --accent-hover: #34d399;
       --text: #f8fafc;
       --text-muted: #94a3b8;
       --border: #334155;
@@ -25,7 +26,7 @@
       padding: 2rem 1rem;
     }
     .container {
-      max-width: 680px;
+      max-width: 720px;
       width: 100%;
     }
     header {
@@ -66,7 +67,7 @@
     }
     .grid {
       display: grid;
-      grid-template-columns: repeat(auto-fit, minmax(90px, 1fr));
+      grid-template-columns: repeat(auto-fit, minmax(95px, 1fr));
       gap: 0.75rem;
       text-align: center;
     }
@@ -86,6 +87,61 @@
       font-size: 1.1rem;
       font-weight: 600;
       color: var(--text);
+    }
+    .btn-action {
+      background: var(--accent);
+      color: #0f172a;
+      border: none;
+      font-weight: 600;
+      font-size: 0.95rem;
+      padding: 0.75rem 1.25rem;
+      border-radius: 8px;
+      cursor: pointer;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      gap: 0.5rem;
+      width: 100%;
+      margin-top: 1.25rem;
+      text-decoration: none;
+      transition: all 0.2s ease;
+    }
+    .btn-action:hover {
+      background: var(--accent-hover);
+      transform: translateY(-1px);
+    }
+    .table-container {
+      margin-top: 1.25rem;
+      display: none;
+      overflow-x: auto;
+    }
+    table.schedule-table {
+      width: 100%;
+      border-collapse: collapse;
+      text-align: center;
+      font-size: 0.85rem;
+      min-width: 580px;
+    }
+    table.schedule-table th, table.schedule-table td {
+      padding: 0.6rem 0.4rem;
+      border-bottom: 1px solid var(--border);
+    }
+    table.schedule-table th {
+      background: rgba(15, 23, 42, 0.8);
+      color: var(--accent);
+      font-weight: 600;
+    }
+    table.schedule-table tr.today-row {
+      background: rgba(16, 185, 129, 0.18);
+      font-weight: bold;
+    }
+    table.schedule-table tr.today-row td {
+      color: #34d399;
+      border-top: 1px solid rgba(16, 185, 129, 0.4);
+      border-bottom: 1px solid rgba(16, 185, 129, 0.4);
+    }
+    table.schedule-table tr.past-row {
+      opacity: 0.55;
     }
     .endpoint-item {
       margin-bottom: 1rem;
@@ -145,6 +201,31 @@
         <div class="prayer-slot"><div class="prayer-name">Maghrib</div><div class="prayer-time" id="time-maghrib">--:--</div></div>
         <div class="prayer-slot"><div class="prayer-name">Isha</div><div class="prayer-time" id="time-isha">--:--</div></div>
       </div>
+
+      <button id="toggle-schedule-btn" class="btn-action">
+        📅 Open Full Monthly Schedule
+      </button>
+
+      <div class="table-container" id="schedule-container">
+        <table class="schedule-table">
+          <thead>
+            <tr>
+              <th>اليوم</th>
+              <th>هجري</th>
+              <th>التاريخ</th>
+              <th>الصبح</th>
+              <th>الشروق</th>
+              <th>الظهر</th>
+              <th>العصر</th>
+              <th>المغرب</th>
+              <th>العشاء</th>
+            </tr>
+          </thead>
+          <tbody id="schedule-tbody">
+            <tr><td colspan="9">Loading schedule table...</td></tr>
+          </tbody>
+        </table>
+      </div>
     </div>
 
     <div class="card">
@@ -152,14 +233,14 @@
       <div class="endpoint-item">
         <div>
           <span class="badge-method">GET</span>
-          <a class="endpoint-link" href="api/sala-al-jadida/today.json">/api/sala-al-jadida/today.json</a>
+          <a class="endpoint-link" href="api/sala-al-jadida/today.json" target="_blank">/api/sala-al-jadida/today.json</a>
         </div>
         <div class="endpoint-desc">Current day's prayer timings, Hijri date, and metadata.</div>
       </div>
       <div class="endpoint-item" style="margin-top: 1rem;">
         <div>
           <span class="badge-method">GET</span>
-          <a class="endpoint-link" href="api/sala-al-jadida/month.json">/api/sala-al-jadida/month.json</a>
+          <a class="endpoint-link" href="api/sala-al-jadida/month.json" target="_blank">/api/sala-al-jadida/month.json</a>
         </div>
         <div class="endpoint-desc">Full monthly calendar schedule with daily breakdowns.</div>
       </div>
@@ -185,6 +266,60 @@
         console.error('Error fetching today timings:', err);
       }
     }
+
+    let monthLoaded = false;
+    async function loadMonthlySchedule() {
+      const tbody = document.getElementById('schedule-tbody');
+      try {
+        const res = await fetch('api/sala-al-jadida/month.json');
+        if (!res.ok) throw new Error('HTTP ' + res.status);
+        const data = await res.json();
+        const nowIso = new Date().toISOString().slice(0, 10);
+        tbody.innerHTML = '';
+        data.days.forEach(d => {
+          const tr = document.createElement('tr');
+          const isToday = d.is_today || d.date === nowIso;
+          const isPast = d.date && d.date < nowIso;
+          if (isToday) tr.className = 'today-row';
+          else if (isPast) tr.className = 'past-row';
+
+          const dateDisplay = d.date ? d.date.slice(5) : d.gregorian_day;
+          tr.innerHTML = `
+            <td>${d.day_ar}${isToday ? ' ★' : ''}</td>
+            <td>${d.hijri_day}</td>
+            <td>${dateDisplay}</td>
+            <td>${d.fajr}</td>
+            <td>${d.sunrise}</td>
+            <td>${d.dhuhr}</td>
+            <td>${d.asr}</td>
+            <td>${d.maghrib}</td>
+            <td>${d.isha}</td>
+          `;
+          tbody.appendChild(tr);
+        });
+        monthLoaded = true;
+      } catch (err) {
+        tbody.innerHTML = `<tr><td colspan="9" style="color:#f87171;">Failed to load monthly schedule: ${err.message}</td></tr>`;
+      }
+    }
+
+    const toggleBtn = document.getElementById('toggle-schedule-btn');
+    const container = document.getElementById('schedule-container');
+
+    toggleBtn.addEventListener('click', async () => {
+      const isVisible = container.style.display === 'block';
+      if (isVisible) {
+        container.style.display = 'none';
+        toggleBtn.innerText = '📅 Open Full Monthly Schedule';
+      } else {
+        container.style.display = 'block';
+        toggleBtn.innerText = '✖ Close Monthly Schedule';
+        if (!monthLoaded) {
+          await loadMonthlySchedule();
+        }
+      }
+    });
+
     loadToday();
   </script>
 </body>

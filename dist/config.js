@@ -1,4 +1,3 @@
-
 var GLib = imports.gi.GLib;
 var Gio = imports.gi.Gio;
 var Constants = imports.misc.extensionUtils.getCurrentExtension().imports.constants;
@@ -85,6 +84,7 @@ function securePermissions(path, mode) {
     catch (e) { }
 }
 function saveConfig(config) {
+    var _a, _b, _c, _d, _e, _f, _g, _h, _j, _k;
     try {
         if (!GLib.file_test(Constants.CONFIG_DIR, GLib.FileTest.EXISTS)) {
             GLib.mkdir_with_parents(Constants.CONFIG_DIR, 0o700);
@@ -95,16 +95,16 @@ function saveConfig(config) {
             cityName: config.city.name,
             lang: config.lang,
             iqamaDelays: config.iqamaDelays,
-            lockEnabled: config.lockEnabled ?? false,
-            customLockCommand: config.customLockCommand ?? '',
-            adhanAudioPath: config.adhanAudioPath ?? '',
-            duaaAfterAdhan: config.duaaAfterAdhan ?? true,
-            duaaAudioPath: config.duaaAudioPath ?? '',
-            fridayReminderEnabled: config.fridayReminderEnabled ?? true,
-            fridayReminderMinutes: config.fridayReminderMinutes ?? 60,
-            wuduReminderEnabled: config.wuduReminderEnabled ?? true,
-            wuduReminderMinutes: config.wuduReminderMinutes ?? 15,
-            wuduAudioPath: config.wuduAudioPath ?? ''
+            lockEnabled: (_a = config.lockEnabled) !== null && _a !== void 0 ? _a : false,
+            customLockCommand: (_b = config.customLockCommand) !== null && _b !== void 0 ? _b : '',
+            adhanAudioPath: (_c = config.adhanAudioPath) !== null && _c !== void 0 ? _c : '',
+            duaaAfterAdhan: (_d = config.duaaAfterAdhan) !== null && _d !== void 0 ? _d : true,
+            duaaAudioPath: (_e = config.duaaAudioPath) !== null && _e !== void 0 ? _e : '',
+            fridayReminderEnabled: (_f = config.fridayReminderEnabled) !== null && _f !== void 0 ? _f : true,
+            fridayReminderMinutes: (_g = config.fridayReminderMinutes) !== null && _g !== void 0 ? _g : 60,
+            wuduReminderEnabled: (_h = config.wuduReminderEnabled) !== null && _h !== void 0 ? _h : true,
+            wuduReminderMinutes: (_j = config.wuduReminderMinutes) !== null && _j !== void 0 ? _j : 15,
+            wuduAudioPath: (_k = config.wuduAudioPath) !== null && _k !== void 0 ? _k : ''
         }, null, 2);
         GLib.file_set_contents(Constants.CONFIG_FILE, new TextEncoder().encode(data));
         securePermissions(Constants.CONFIG_FILE, 0o600);

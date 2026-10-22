@@ -27,6 +27,8 @@ export default class SalatExtension extends Extension {
     private triggeredIqamas: Record<string, boolean> = {};
     private triggeredFridayReminders: Record<string, boolean> = {};
     private triggeredWuduReminders: Record<string, boolean> = {};
+    private wuduDone: boolean = false;
+    private lastWuduPrayerKey: string = '';
 
     enable() {
         log('[SalatExtension ESM] Enabling extension...');
@@ -53,7 +55,7 @@ export default class SalatExtension extends Extension {
                 if (!this.prayerTimesData || (now.getHours() === 0 && now.getMinutes() === 0 && now.getSeconds() === 0)) {
                     this.refreshPrayerTimes();
                 } else if (this.config) {
-                    UI.updatePanelText(this.indicator, this.prayerTimesData, this.config.iqamaDelays, this.config.lang);
+                    UI.updatePanelText(this.indicator, this.prayerTimesData, this.config.iqamaDelays, this.config.lang, this.wuduDone);
                     this.checkPrayerEvents(now);
                 }
                 return GLib.SOURCE_CONTINUE;
@@ -102,7 +104,7 @@ export default class SalatExtension extends Extension {
         try {
             log('[SalatExtension ESM] Syncing UI...');
             if (!this.config) return;
-            UI.updatePanelText(this.indicator, this.prayerTimesData, this.config.iqamaDelays, this.config.lang);
+            UI.updatePanelText(this.indicator, this.prayerTimesData, this.config.iqamaDelays, this.config.lang, this.wuduDone);
             UI.rebuildMenu(this.indicator, this.config, this.prayerTimesData, {
                 onSelectCity: (city: City) => {
                     log('[SalatExtension ESM] City selected: ' + city.name);
@@ -142,8 +144,14 @@ export default class SalatExtension extends Extension {
                         this.config.lockEnabled = enabled;
                         Config.saveConfig(this.config);
                     }
+                },
+                onQuickWudu: () => {
+                    this.toggleQuickWudu();
+                },
+                onOpenScheduleWindow: () => {
+                    this.openScheduleWindow();
                 }
-            });
+            }, this.wuduDone);
             log('[SalatExtension ESM] UI sync completed successfully.');
         } catch (e: any) {
             log('[SalatExtension ESM] Error in reloadAndSyncUI: ' + e.message + '\n' + e.stack);
@@ -281,17 +289,9 @@ export default class SalatExtension extends Extension {
 
         log('[SalatExtension ESM] 📢 Triggering Adhan audio playback: ' + audioPath);
         try {
-            GLib.spawn_command_line_async('notify-send "Salat Timer" "📢 Adhan time!"');
-            if (GLib.find_program_in_path('cvlc')) {
-                GLib.spawn_command_line_async(`cvlc --play-and-exit --no-video "${audioPath}"`);
-            } else if (GLib.find_program_in_path('pw-play')) {
-                GLib.spawn_command_line_async(`pw-play "${audioPath}"`);
-            } else if (GLib.find_program_in_path('paplay')) {
-                GLib.spawn_command_line_async(`paplay "${audioPath}"`);
-            } else {
-                const pyScript = `import gi, sys; gi.require_version('Gst', '1.0'); from gi.repository import Gst, GLib; Gst.init(None); p = Gst.ElementFactory.make('playbin', 'p'); p.set_property('uri', 'file://' + sys.argv[1]); p.set_state(Gst.State.PLAYING); loop = GLib.MainLoop(); b = p.get_bus(); b.add_watch(GLib.PRIORITY_DEFAULT, lambda bus, msg: loop.quit() if msg.type in (Gst.MessageType.EOS, Gst.MessageType.ERROR) else True); loop.run()`;
-                GLib.spawn_command_line_async(`python3 -c "${pyScript}" "${audioPath}"`);
-            }
+            const title = I18n.t('adhan', this.config ? this.config.lang : 'auto');
+            GLib.spawn_command_line_async(`notify-send -u critical "Salat Timer" "📢 ${title} time!"`);
+            this.playAudioFile(audioPath);
         } catch (e: any) {
             log('[SalatExtension ESM] Audio playback failed: ' + e.message);
         }
@@ -334,6 +334,14 @@ export default class SalatExtension extends Extension {
             this.config.lang,
             now
         );
+
+        const active = Calculator.findActivePrayer(prayers, this.config.iqamaDelays, now);
+        if (active && this.wuduDone && this.lastWuduPrayerKey && active.prayer.key !== this.lastWuduPrayerKey) {
+            log(`[SalatExtension ESM] Prayer transitioned (${this.lastWuduPrayerKey} -> ${active.prayer.key}). Clearing Wudu mark.`);
+            this.wuduDone = false;
+            this.lastWuduPrayerKey = '';
+            this.reloadAndSyncUI();
+        }
 
         const datePrefix = `${now.getFullYear()}-${now.getMonth() + 1}-${now.getDate()}`;
 
@@ -480,21 +488,139 @@ export default class SalatExtension extends Extension {
         } catch (e: any) {}
     }
 
-    private playAudioFile(audioPath: string): void {
-        if (!audioPath || !GLib.file_test(audioPath, GLib.FileTest.EXISTS)) return;
+    private getAudioPlayerScript(): string | null {
         try {
-            if (GLib.find_program_in_path('cvlc')) {
-                GLib.spawn_command_line_async(`cvlc --play-and-exit --no-video "${audioPath}"`);
-            } else if (GLib.find_program_in_path('pw-play')) {
-                GLib.spawn_command_line_async(`pw-play "${audioPath}"`);
-            } else if (GLib.find_program_in_path('paplay')) {
-                GLib.spawn_command_line_async(`paplay "${audioPath}"`);
+            if (this.dir) {
+                let f = this.dir.get_child('play_audio.py');
+                if (f.query_exists(null)) return f.get_path();
+            }
+            if (this.path) {
+                let p = GLib.build_filenamev([this.path, 'play_audio.py']);
+                if (GLib.file_test(p, GLib.FileTest.EXISTS)) return p;
+            }
+            let extPath = GLib.build_filenamev([
+                GLib.get_home_dir(),
+                '.local',
+                'share',
+                'gnome-shell',
+                'extensions',
+                'salat-timer@moroccan-habous',
+                'play_audio.py'
+            ]);
+            if (GLib.file_test(extPath, GLib.FileTest.EXISTS)) return extPath;
+            let cur = GLib.build_filenamev([GLib.get_current_dir(), 'play_audio.py']);
+            if (GLib.file_test(cur, GLib.FileTest.EXISTS)) return cur;
+            let srcCur = GLib.build_filenamev([GLib.get_current_dir(), 'src', 'play_audio.py']);
+            if (GLib.file_test(srcCur, GLib.FileTest.EXISTS)) return srcCur;
+        } catch (e: any) {}
+        return null;
+    }
+
+    private getScheduleWindowScript(): string | null {
+        try {
+            if (this.dir) {
+                let f = this.dir.get_child('schedule_window.py');
+                if (f.query_exists(null)) return f.get_path();
+            }
+            if (this.path) {
+                let p = GLib.build_filenamev([this.path, 'schedule_window.py']);
+                if (GLib.file_test(p, GLib.FileTest.EXISTS)) return p;
+            }
+            let extPath = GLib.build_filenamev([
+                GLib.get_home_dir(),
+                '.local',
+                'share',
+                'gnome-shell',
+                'extensions',
+                'salat-timer@moroccan-habous',
+                'schedule_window.py'
+            ]);
+            if (GLib.file_test(extPath, GLib.FileTest.EXISTS)) return extPath;
+            let cur = GLib.build_filenamev([GLib.get_current_dir(), 'schedule_window.py']);
+            if (GLib.file_test(cur, GLib.FileTest.EXISTS)) return cur;
+            let srcCur = GLib.build_filenamev([GLib.get_current_dir(), 'src', 'schedule_window.py']);
+            if (GLib.file_test(srcCur, GLib.FileTest.EXISTS)) return srcCur;
+        } catch (e: any) {}
+        return null;
+    }
+
+    public toggleQuickWudu(): void {
+        const now = new Date();
+        const prayers = this.prayerTimesData && this.config
+            ? Calculator.getPrayerEntries(this.prayerTimesData, this.config.iqamaDelays, this.config.lang, now)
+            : [];
+        const active = Calculator.findActivePrayer(prayers, this.config ? this.config.iqamaDelays : Constants.DEFAULT_IQAMA_DELAYS, now);
+        const prayerName = active ? active.prayer.name : '';
+        const prayerKey = active ? active.prayer.key : '';
+
+        this.wuduDone = !this.wuduDone;
+        if (this.wuduDone) {
+            this.lastWuduPrayerKey = prayerKey;
+        } else {
+            this.lastWuduPrayerKey = '';
+        }
+
+        log(`[SalatExtension ESM] 💧 Quick Wudu toggled: done=${this.wuduDone} for prayer=${prayerName}`);
+        this.reloadAndSyncUI();
+
+        const lang = this.config ? this.config.lang : 'auto';
+        try {
+            if (this.wuduDone) {
+                const title = I18n.t('wudu_marked_title', lang);
+                const body = I18n.t('wudu_marked_body', lang, { prayer: prayerName });
+                GLib.spawn_command_line_async(`notify-send -u normal "${title.replace(/"/g, '\\"')}" "${body.replace(/"/g, '\\"')}"`);
+
+                if (this.config && this.config.wuduAudioPath && this.config.wuduAudioPath.trim().length > 0) {
+                    let audio = this.config.wuduAudioPath.trim();
+                    if (audio.startsWith('~')) audio = GLib.get_home_dir() + audio.slice(1);
+                    if (GLib.file_test(audio, GLib.FileTest.EXISTS)) {
+                        this.playAudioFile(audio);
+                        return;
+                    }
+                }
+
+                if (GLib.find_program_in_path('canberra-gtk-play')) {
+                    GLib.spawn_command_line_async('canberra-gtk-play -i message-new-instant');
+                }
             } else {
-                const pyScript = `import gi, sys; gi.require_version('Gst', '1.0'); from gi.repository import Gst, GLib; Gst.init(None); p = Gst.ElementFactory.make('playbin', 'p'); p.set_property('uri', 'file://' + sys.argv[1]); p.set_state(Gst.State.PLAYING); loop = GLib.MainLoop(); b = p.get_bus(); b.add_watch(GLib.PRIORITY_DEFAULT, lambda bus, msg: loop.quit() if msg.type in (Gst.MessageType.EOS, Gst.MessageType.ERROR) else True); loop.run()`;
-                GLib.spawn_command_line_async(`python3 -c "${pyScript}" "${audioPath}"`);
+                const title = I18n.t('wudu_cleared_title', lang);
+                const body = I18n.t('wudu_cleared_body', lang, { prayer: prayerName });
+                GLib.spawn_command_line_async(`notify-send -u normal "${title.replace(/"/g, '\\"')}" "${body.replace(/"/g, '\\"')}"`);
             }
         } catch (e: any) {
-            log('[SalatExtension ESM] Audio playback failed: ' + e.message);
+            log('[SalatExtension ESM] Error sending Wudu notification: ' + e.message);
         }
+    }
+
+    private openScheduleWindow(): void {
+        log('[SalatExtension ESM] 📅 Launching dedicated monthly schedule window...');
+        const script = this.getScheduleWindowScript();
+        if (script) {
+            GLib.spawn_command_line_async(`python3 "${script}"`);
+        } else {
+            GLib.spawn_command_line_async('python3 -m salat_schedule 2>/dev/null || gnome-extensions prefs salat-timer@moroccan-habous');
+        }
+    }
+
+    private playAudioFile(audioPath: string): void {
+        if (!audioPath) return;
+        if (audioPath.startsWith('~')) {
+            audioPath = GLib.get_home_dir() + audioPath.slice(1);
+        }
+        if (!GLib.file_test(audioPath, GLib.FileTest.EXISTS)) {
+            log('[SalatExtension ESM] Audio file not found: ' + audioPath);
+            return;
+        }
+
+        log('[SalatExtension ESM] 🔊 Playing audio via robust helper: ' + audioPath);
+
+        const helper = this.getAudioPlayerScript();
+        if (helper) {
+            GLib.spawn_command_line_async(`python3 "${helper}" "${audioPath}"`);
+            return;
+        }
+
+        const pyScript = `import gi, sys, os; gi.require_version('Gst', '1.0'); from gi.repository import Gst, GLib; Gst.init(None); p = Gst.ElementFactory.make('playbin', 'p'); p.set_property('uri', GLib.filename_to_uri(os.path.abspath(sys.argv[1]), None)); p.set_state(Gst.State.PLAYING); loop = GLib.MainLoop(); b = p.get_bus(); b.add_watch(GLib.PRIORITY_DEFAULT, lambda bus, msg: loop.quit() if msg.type in (Gst.MessageType.EOS, Gst.MessageType.ERROR) else True); loop.run(); p.set_state(Gst.State.NULL)`;
+        GLib.spawn_command_line_async(`python3 -c "${pyScript}" "${audioPath}"`);
     }
 }

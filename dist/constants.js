@@ -1,10 +1,10 @@
-
 var GLib = imports.gi.GLib;
 var CONFIG_DIR = GLib.get_user_config_dir() + '/salat-gnome-extension';
 var CONFIG_FILE = CONFIG_DIR + '/config.json';
 var CACHE_FILE = CONFIG_DIR + '/cache.json';
+var CLOUDFLARE_API_URL = 'https://small-morning-6206.abdo-bissari.workers.dev/api/sala-al-jadida';
 var CITIES = [
-    { id: 1, name: 'Rabat / Salé / Sala Al Jadida' },
+    { id: 1, name: 'Sala Al Jadida' },
     { id: 5, name: 'Casablanca' },
     { id: 10, name: 'Marrakech' },
     { id: 11, name: 'Tanger' },

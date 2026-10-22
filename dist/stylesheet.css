@@ -1,0 +1,208 @@
+/* Moroccan Salat GNOME Extension - Modern UI Theme (replica of user design) */
+
+.salat-menu-box {
+    padding: 6px 4px;
+    spacing: 6px;
+    min-width: 320px;
+}
+
+/* Top Header */
+.salat-header-row {
+    padding: 4px 10px 6px 10px;
+    margin-bottom: 2px;
+}
+
+.salat-header-city {
+    font-size: 13px;
+    font-weight: bold;
+    color: #f8fafc;
+}
+
+.salat-header-date {
+    font-size: 11px;
+    color: #94a3b8;
+    text-align: right;
+}
+
+/* Hero Next Prayer Card */
+.salat-hero-card {
+    background-gradient-direction: horizontal;
+    background-gradient-start: #1d4ed8;
+    background-gradient-end: #3b82f6;
+    border-radius: 14px;
+    padding: 14px 16px;
+    margin: 4px 6px 10px 6px;
+    color: #ffffff;
+}
+
+.salat-hero-top-left {
+    font-size: 10px;
+    font-weight: bold;
+    color: rgba(255, 255, 255, 0.85);
+    letter-spacing: 0.8px;
+}
+
+.salat-hero-top-right {
+    font-size: 11px;
+    color: rgba(255, 255, 255, 0.85);
+    text-align: right;
+}
+
+.salat-hero-countdown {
+    font-size: 32px;
+    font-weight: 800;
+    color: #ffffff;
+    margin: 4px 0 8px 0;
+}
+
+.salat-progress-track {
+    background-color: rgba(255, 255, 255, 0.25);
+    border-radius: 3px;
+    height: 5px;
+}
+
+.salat-progress-fill {
+    background-color: #ffffff;
+    border-radius: 3px;
+    height: 5px;
+}
+
+/* Table Header */
+.salat-table-header {
+    padding: 4px 12px;
+    color: #64748b;
+    font-size: 10px;
+    font-weight: bold;
+    letter-spacing: 0.5px;
+}
+
+/* Prayer Rows */
+.salat-prayer-row {
+    padding: 7px 12px;
+    margin: 2px 4px;
+    border-radius: 10px;
+}
+
+.salat-prayer-row:hover {
+    background-color: rgba(255, 255, 255, 0.05);
+}
+
+.salat-prayer-row-active {
+    background-color: #2563eb;
+    border-radius: 10px;
+    padding: 7px 12px;
+    margin: 2px 4px;
+}
+
+.salat-prayer-name-active {
+    font-size: 13px;
+    font-weight: bold;
+    color: #ffffff;
+}
+
+.salat-prayer-time-active {
+    font-size: 13px;
+    font-weight: bold;
+    color: #ffffff;
+}
+
+.salat-prayer-pill-active {
+    background-color: rgba(255, 255, 255, 0.22);
+    border-radius: 10px;
+    padding: 2px 7px;
+    font-size: 11px;
+    font-weight: bold;
+    color: #ffffff;
+}
+
+.salat-prayer-name {
+    font-size: 13px;
+    color: #e2e8f0;
+}
+
+.salat-prayer-check {
+    font-size: 12px;
+    color: #22c55e;
+    font-weight: bold;
+    margin-right: 4px;
+}
+
+.salat-prayer-time-adhan {
+    font-size: 13px;
+    color: #94a3b8;
+}
+
+.salat-prayer-time-iqama {
+    font-size: 13px;
+    color: #e2e8f0;
+    font-weight: 600;
+}
+
+.salat-prayer-pill {
+    background-color: rgba(255, 255, 255, 0.08);
+    border-radius: 10px;
+    padding: 2px 7px;
+    font-size: 11px;
+    color: #94a3b8;
+}
+
+/* Action Cards */
+.salat-action-card {
+    background-color: #1e2026;
+    border-radius: 12px;
+    padding: 10px 14px;
+    margin: 4px 6px;
+}
+
+.salat-action-card:hover {
+    background-color: #262931;
+}
+
+.salat-card-icon-box {
+    background-color: rgba(59, 130, 246, 0.15);
+    border-radius: 9px;
+    width: 34px;
+    height: 34px;
+    text-align: center;
+    margin-right: 12px;
+}
+
+.salat-card-icon-text {
+    font-size: 16px;
+}
+
+.salat-card-title {
+    font-size: 13px;
+    font-weight: bold;
+    color: #f8fafc;
+}
+
+.salat-card-subtitle {
+    font-size: 11px;
+    color: #94a3b8;
+}
+
+.salat-card-arrow {
+    font-size: 16px;
+    color: #64748b;
+    font-weight: bold;
+}
+
+/* Settings Button */
+.salat-settings-btn {
+    background-color: #1e2026;
+    border-radius: 10px;
+    padding: 10px 14px;
+    margin: 6px 6px 2px 6px;
+    text-align: center;
+}
+
+.salat-settings-btn:hover {
+    background-color: #262931;
+}
+
+.salat-settings-btn-label {
+    font-size: 13px;
+    font-weight: 600;
+    color: #e2e8f0;
+}
