@@ -1,0 +1,18 @@
+{
+  "city": "sala-al-jadida",
+  "city_label": "Sala Al-Jadida",
+  "date": "2026-10-22",
+  "day_name_fr": "Jeudi",
+  "day_name_ar": "الخميس",
+  "hijri_day": "10",
+  "hijri_month": "جُمَادَى ٱلْأُولَى",
+  "timings": {
+    "fajr": "05:09",
+    "sunrise": "06:35",
+    "dhuhr": "12:17",
+    "asr": "15:20",
+    "maghrib": "17:49",
+    "isha": "19:04"
+  },
+  "last_updated": "2026-10-22T20:50:38.813477+00:00"
+}

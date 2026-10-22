@@ -1,0 +1,191 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Sala Al-Jadida Prayer Times API</title>
+  <style>
+    :root {
+      --bg: #0f172a;
+      --card-bg: #1e293b;
+      --accent: #10b981;
+      --text: #f8fafc;
+      --text-muted: #94a3b8;
+      --border: #334155;
+    }
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+      background: var(--bg);
+      color: var(--text);
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      min-height: 100vh;
+      padding: 2rem 1rem;
+    }
+    .container {
+      max-width: 680px;
+      width: 100%;
+    }
+    header {
+      text-align: center;
+      margin-bottom: 2rem;
+    }
+    header h1 {
+      font-size: 1.8rem;
+      margin-bottom: 0.5rem;
+      color: var(--accent);
+    }
+    header p {
+      color: var(--text-muted);
+      font-size: 0.95rem;
+    }
+    .card {
+      background: var(--card-bg);
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      padding: 1.5rem;
+      margin-bottom: 1.5rem;
+      box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1);
+    }
+    .card h2 {
+      font-size: 1.2rem;
+      margin-bottom: 1rem;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+    }
+    .date-badge {
+      font-size: 0.85rem;
+      background: rgba(16, 185, 129, 0.15);
+      color: var(--accent);
+      padding: 0.25rem 0.6rem;
+      border-radius: 6px;
+      font-weight: 500;
+    }
+    .grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(90px, 1fr));
+      gap: 0.75rem;
+      text-align: center;
+    }
+    .prayer-slot {
+      background: rgba(15, 23, 42, 0.6);
+      padding: 0.8rem 0.5rem;
+      border-radius: 8px;
+      border: 1px solid var(--border);
+    }
+    .prayer-name {
+      font-size: 0.8rem;
+      color: var(--text-muted);
+      text-transform: capitalize;
+      margin-bottom: 0.3rem;
+    }
+    .prayer-time {
+      font-size: 1.1rem;
+      font-weight: 600;
+      color: var(--text);
+    }
+    .endpoint-item {
+      margin-bottom: 1rem;
+    }
+    .endpoint-item:last-child {
+      margin-bottom: 0;
+    }
+    .badge-method {
+      display: inline-block;
+      background: #0284c7;
+      color: white;
+      font-weight: bold;
+      font-size: 0.75rem;
+      padding: 0.2rem 0.45rem;
+      border-radius: 4px;
+      margin-right: 0.5rem;
+    }
+    .endpoint-link {
+      color: #38bdf8;
+      text-decoration: none;
+      font-family: monospace;
+      font-size: 0.95rem;
+    }
+    .endpoint-link:hover {
+      text-decoration: underline;
+    }
+    .endpoint-desc {
+      color: var(--text-muted);
+      font-size: 0.85rem;
+      margin-top: 0.25rem;
+    }
+    footer {
+      text-align: center;
+      color: var(--text-muted);
+      font-size: 0.8rem;
+      margin-top: 2rem;
+    }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <header>
+      <h1>Sala Al-Jadida Prayer API</h1>
+      <p>Automated static prayer times API, updated daily via priere.ma</p>
+    </header>
+
+    <div class="card" id="today-card">
+      <h2>
+        <span>Today's Timings</span>
+        <span class="date-badge" id="today-date">Loading...</span>
+      </h2>
+      <div class="grid" id="prayer-grid">
+        <div class="prayer-slot"><div class="prayer-name">Fajr</div><div class="prayer-time" id="time-fajr">--:--</div></div>
+        <div class="prayer-slot"><div class="prayer-name">Sunrise</div><div class="prayer-time" id="time-sunrise">--:--</div></div>
+        <div class="prayer-slot"><div class="prayer-name">Dhuhr</div><div class="prayer-time" id="time-dhuhr">--:--</div></div>
+        <div class="prayer-slot"><div class="prayer-name">Asr</div><div class="prayer-time" id="time-asr">--:--</div></div>
+        <div class="prayer-slot"><div class="prayer-name">Maghrib</div><div class="prayer-time" id="time-maghrib">--:--</div></div>
+        <div class="prayer-slot"><div class="prayer-name">Isha</div><div class="prayer-time" id="time-isha">--:--</div></div>
+      </div>
+    </div>
+
+    <div class="card">
+      <h2>API Endpoints</h2>
+      <div class="endpoint-item">
+        <div>
+          <span class="badge-method">GET</span>
+          <a class="endpoint-link" href="api/sala-al-jadida/today.json">/api/sala-al-jadida/today.json</a>
+        </div>
+        <div class="endpoint-desc">Current day's prayer timings, Hijri date, and metadata.</div>
+      </div>
+      <div class="endpoint-item" style="margin-top: 1rem;">
+        <div>
+          <span class="badge-method">GET</span>
+          <a class="endpoint-link" href="api/sala-al-jadida/month.json">/api/sala-al-jadida/month.json</a>
+        </div>
+        <div class="endpoint-desc">Full monthly calendar schedule with daily breakdowns.</div>
+      </div>
+    </div>
+
+    <footer>
+      Data source: priere.ma &bull; Hosted on Cloudflare Pages
+    </footer>
+  </div>
+
+  <script>
+    async function loadToday() {
+      try {
+        const res = await fetch('api/sala-al-jadida/today.json');
+        if (!res.ok) return;
+        const data = await res.json();
+        document.getElementById('today-date').innerText = `${data.day_name_fr} ${data.date} (${data.hijri_day} ${data.hijri_month})`;
+        for (const [key, val] of Object.entries(data.timings)) {
+          const el = document.getElementById('time-' + key);
+          if (el) el.innerText = val;
+        }
+      } catch (err) {
+        console.error('Error fetching today timings:', err);
+      }
+    }
+    loadToday();
+  </script>
+</body>
+</html>
