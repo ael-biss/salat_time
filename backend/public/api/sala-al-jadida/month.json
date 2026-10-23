@@ -133,7 +133,7 @@
       "asr": "15:20",
       "maghrib": "17:49",
       "isha": "19:04",
-      "is_today": true
+      "is_today": false
     },
     {
       "date": "2026-10-23",
@@ -146,7 +146,7 @@
       "asr": "15:19",
       "maghrib": "17:48",
       "isha": "19:03",
-      "is_today": false
+      "is_today": true
     },
     {
       "date": "2026-10-24",
@@ -396,5 +396,5 @@
       "is_today": false
     }
   ],
-  "last_updated": "2026-10-22T20:50:38.813477+00:00"
+  "last_updated": "2026-10-23T05:31:19.040048+00:00"
 }
