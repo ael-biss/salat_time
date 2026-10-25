@@ -118,10 +118,11 @@ class ScheduleWindow(Gtk.ApplicationWindow):
         self.grid.attach(sep, 0, 1, 9, 1)
 
         today_iso = datetime.date.today().isoformat()
+        today_num = datetime.date.today().day
 
         for idx, day in enumerate(schedule['days']):
             row_idx = idx + 2
-            is_today = day.get('is_today', False) or day.get('date') == today_iso
+            is_today = (day.get('date') == today_iso) or (day.get('gregorian_day') == today_num)
             is_past = day.get('date', '') < today_iso if day.get('date') else False
 
             date_str = day['date'][5:] if day.get('date') else str(day.get('gregorian_day', ''))

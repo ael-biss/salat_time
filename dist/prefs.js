@@ -776,7 +776,7 @@ function fillPreferencesWindow(window) {
             const todayIso = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
             schedule.days.forEach((day, idx) => {
                 const rowIdx = idx + 2;
-                const isToday = !!day.is_today || (day.date === todayIso);
+                const isToday = (day.date === todayIso) || (Number(day.gregorian_day) === now.getDate());
                 const isPast = day.date && day.date < todayIso;
                 const dayCols = [
                     day.day_ar || '',

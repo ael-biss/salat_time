@@ -39,7 +39,7 @@ function formatHeaderDate(now, lang) {
     const monthly = Api.getMonthlySchedule();
     if (monthly) {
         const todayIso = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
-        const found = Array.isArray(monthly.days) ? monthly.days.find((d) => d.date === todayIso || d.is_today) : null;
+        const found = Array.isArray(monthly.days) ? monthly.days.find((d) => d.date === todayIso || Number(d.gregorian_day) === now.getDate()) : null;
         if (found && found.hijri_day) {
             hijriStr = `${found.hijri_day} ${monthly.hijri_month || ''}`.trim();
         }

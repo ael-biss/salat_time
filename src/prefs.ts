@@ -809,7 +809,7 @@ export default class SalatPreferences extends ExtensionPreferences {
 
             schedule.days.forEach((day: MonthlyScheduleDay, idx: number) => {
                 const rowIdx = idx + 2;
-                const isToday = !!day.is_today || (day.date === todayIso);
+                const isToday = (day.date === todayIso) || (Number(day.gregorian_day) === now.getDate());
                 const isPast = day.date && day.date < todayIso;
 
                 const dayCols = [

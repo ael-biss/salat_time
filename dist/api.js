@@ -56,7 +56,15 @@ function getCachedPrayerTimes(cityId, date) {
         const dayKey = String(date.getDate());
         const cid = String(cityId);
         if (cache.cities && cache.cities[cid] && cache.cities[cid][monthKey]) {
-            return cache.cities[cid][monthKey][dayKey] || null;
+            const item = cache.cities[cid][monthKey][dayKey] || null;
+            if (item) {
+                const expectedDate = `${year}-${month}-${String(date.getDate()).padStart(2, '0')}`;
+                if (item.date && item.date !== expectedDate) {
+                    log(`[SalatExtension API] Cache date mismatch for day ${dayKey}: item.date=${item.date}, expected=${expectedDate}`);
+                    return null;
+                }
+                return item;
+            }
         }
     }
     catch (e) {
@@ -321,7 +329,7 @@ function fetchPrayerTimes(session, cityId, onSuccess, onError) {
         const todayStr = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
         fetchMonthlySchedule(session, false, (schedule) => {
             if (schedule && schedule.days) {
-                const todayDay = schedule.days.find((d) => d.is_today || d.date === todayStr);
+                const todayDay = schedule.days.find((d) => d.date === todayStr || Number(d.gregorian_day) === now.getDate());
                 if (todayDay) {
                     const item = {
                         Fajr: todayDay.fajr,
@@ -336,7 +344,7 @@ function fetchPrayerTimes(session, cityId, onSuccess, onError) {
                         gregorian_day: todayDay.gregorian_day
                     };
                     setCachedPrayerTimes(cityId, now, item);
-                    if (!cached)
+                    if (!cached || cached.date !== todayStr)
                         onSuccess(item);
                     return;
                 }
