@@ -1,18 +1,18 @@
 {
   "city": "sala-al-jadida",
   "city_label": "Sala Al-Jadida",
-  "date": "2026-10-24",
-  "day_name_fr": "Samedi",
-  "day_name_ar": "السبت",
-  "hijri_day": "12",
+  "date": "2026-10-25",
+  "day_name_fr": "Dimanche",
+  "day_name_ar": "الأحد",
+  "hijri_day": "13",
   "hijri_month": "جُمَادَى ٱلْأُولَى",
   "timings": {
     "fajr": "05:11",
-    "sunrise": "06:37",
-    "dhuhr": "12:17",
-    "asr": "15:18",
-    "maghrib": "17:47",
-    "isha": "19:02"
+    "sunrise": "06:38",
+    "dhuhr": "12:16",
+    "asr": "15:17",
+    "maghrib": "17:46",
+    "isha": "19:01"
   },
-  "last_updated": "2026-10-24T05:10:01.741553+00:00"
+  "last_updated": "2026-10-25T05:27:02.944317+00:00"
 }
