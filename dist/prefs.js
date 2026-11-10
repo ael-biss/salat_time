@@ -4,11 +4,30 @@ var ExtensionUtils = imports.misc.extensionUtils;
 function _getPrefsModules() {
     const Me = ExtensionUtils.getCurrentExtension();
     return {
-        Constants: Me.imports.constants,
-        Config: Me.imports.config,
-        I18n: Me.imports.i18n,
-        Api: Me.imports.api
+        Constants: Me.imports['core']['constants'],
+        Config: Me.imports['services']['config-service'],
+        I18n: Me.imports['utils']['i18n'],
+        Api: Me.imports['services']['prayer-service'],
+        AudioService: Me.imports['services']['audio-service'],
+        SystemService: Me.imports['services']['system-service'],
+        FileUtils: Me.imports['utils']['file-utils']
     };
+}
+
+function playAudioPreview(path) {
+    if (!path) return;
+    const { AudioService } = _getPrefsModules();
+    AudioService.playAudio(path);
+}
+
+function resolveDefaultAdhanPath() {
+    const { FileUtils } = _getPrefsModules();
+    return FileUtils.findExtensionFile('adan.mp3') || '';
+}
+
+function openScheduleDedicatedWindow() {
+    const { SystemService } = _getPrefsModules();
+    SystemService.openScheduleWindow();
 }
 
 function init(metadata) {}
@@ -16,50 +35,16 @@ function init(metadata) {}
 function playAudioPreview(path) {
     if (!path)
         return;
-    try {
-        let extPath = GLib.build_filenamev([GLib.get_home_dir(), '.local', 'share', 'gnome-shell', 'extensions', 'salat-timer@moroccan-habous', 'play_audio.py']);
-        let cur = GLib.build_filenamev([GLib.get_current_dir(), 'play_audio.py']);
-        let srcCur = GLib.build_filenamev([GLib.get_current_dir(), 'src', 'play_audio.py']);
-        let script = GLib.file_test(extPath, GLib.FileTest.EXISTS) ? extPath : (GLib.file_test(cur, GLib.FileTest.EXISTS) ? cur : (GLib.file_test(srcCur, GLib.FileTest.EXISTS) ? srcCur : null));
-        if (script) {
-            GLib.spawn_command_line_async(`python3 "${script}" "${path}"`);
-            return;
-        }
-        const pyScript = "import gi, sys, os; gi.require_version('Gst', '1.0'); from gi.repository import Gst, GLib; Gst.init(None); p = Gst.ElementFactory.make('playbin', 'p'); p.set_property('uri', GLib.filename_to_uri(os.path.abspath(sys.argv[1]), None)); p.set_state(Gst.State.PLAYING); loop = GLib.MainLoop(); b = p.get_bus(); b.add_watch(GLib.PRIORITY_DEFAULT, lambda bus, msg: loop.quit() if msg.type in (Gst.MessageType.EOS, Gst.MessageType.ERROR) else True); loop.run(); p.set_state(Gst.State.NULL)";
-        GLib.spawn_command_line_async(`python3 -c "${pyScript}" "${path}"`);
-    }
-    catch (e) {
-        log('[SalatExtension Prefs] Error in audio test: ' + e.message);
-    }
+    AudioService.playAudio(path);
 }
 function resolveDefaultAdhanPath() {
-    let cur = GLib.build_filenamev([GLib.get_current_dir(), 'adan.mp3']);
-    if (GLib.file_test(cur, GLib.FileTest.EXISTS))
-        return cur;
-    let extPath = GLib.build_filenamev([GLib.get_home_dir(), '.local', 'share', 'gnome-shell', 'extensions', 'salat-timer@moroccan-habous', 'adan.mp3']);
-    if (GLib.file_test(extPath, GLib.FileTest.EXISTS))
-        return extPath;
-    return '';
+    return findExtensionFile('adan.mp3') || '';
 }
 function openScheduleDedicatedWindow() {
-    try {
-        let extPath = GLib.build_filenamev([GLib.get_home_dir(), '.local', 'share', 'gnome-shell', 'extensions', 'salat-timer@moroccan-habous', 'schedule_window.py']);
-        let cur = GLib.build_filenamev([GLib.get_current_dir(), 'schedule_window.py']);
-        let srcCur = GLib.build_filenamev([GLib.get_current_dir(), 'src', 'schedule_window.py']);
-        let script = GLib.file_test(extPath, GLib.FileTest.EXISTS) ? extPath : (GLib.file_test(cur, GLib.FileTest.EXISTS) ? cur : (GLib.file_test(srcCur, GLib.FileTest.EXISTS) ? srcCur : null));
-        if (script) {
-            GLib.spawn_command_line_async(`python3 "${script}"`);
-        }
-        else {
-            GLib.spawn_command_line_async('python3 -m salat_schedule 2>/dev/null || true');
-        }
-    }
-    catch (e) {
-        log('[SalatExtension Prefs] Error opening schedule window: ' + e.message);
-    }
+    SystemService.openScheduleWindow();
 }
 function fillPreferencesWindow(window) {
-    const { Constants, Config, I18n, Api } = _getPrefsModules();
+    const { Constants, Config, I18n, Api, AudioService, SystemService, FileUtils } = _getPrefsModules();
         let config = Config.loadConfig();
         window.set_default_size(880, 640);
         // Helper to notify user of save action

@@ -1,0 +1,410 @@
+var GLib = imports.gi.GLib;
+var Soup = imports.gi.Soup;
+var Constants = imports.misc.extensionUtils.getCurrentExtension().imports['core']['constants'];
+var { securePermissions } = imports.misc.extensionUtils.getCurrentExtension().imports['utils']['file-utils'];
+function createSession() {
+    return new Soup.Session();
+}
+function loadCache() {
+    let cache = { cities: {} };
+    try {
+        if (!GLib.file_test(Constants.CACHE_FILE, GLib.FileTest.EXISTS))
+            return cache;
+        let [ok, contents] = GLib.file_get_contents(Constants.CACHE_FILE);
+        if (!ok)
+            return cache;
+        let parsed = JSON.parse(new TextDecoder('utf-8').decode(contents));
+        if (parsed && typeof parsed.cities === 'object') {
+            cache = parsed;
+        }
+    }
+    catch (e) {
+        log('[SalatExtension PrayerService] Load cache error: ' + e.message);
+    }
+    return cache;
+}
+var ONE_WEEK_MS = 7 * 24 * 60 * 60 * 1000;
+function saveCache(cache) {
+    try {
+        if (!GLib.file_test(Constants.CONFIG_DIR, GLib.FileTest.EXISTS)) {
+            GLib.mkdir_with_parents(Constants.CONFIG_DIR, 0o700);
+        }
+        securePermissions(Constants.CONFIG_DIR, 0o700);
+        cache.lastUpdated = Date.now();
+        let data = JSON.stringify(cache, null, 2);
+        GLib.file_set_contents(Constants.CACHE_FILE, new TextEncoder().encode(data));
+        securePermissions(Constants.CACHE_FILE, 0o600);
+        log('[SalatExtension PrayerService] Saved cache securely (0600) to ' + Constants.CACHE_FILE);
+    }
+    catch (e) {
+        log('[SalatExtension PrayerService] Save cache error: ' + e.message);
+    }
+}
+function getCachedPrayerTimes(cityId, date) {
+    try {
+        let cache = loadCache();
+        const year = date.getFullYear();
+        const month = String(date.getMonth() + 1).padStart(2, '0');
+        const monthKey = `${year}-${month}`;
+        const dayKey = String(date.getDate());
+        const cid = String(cityId);
+        if (cache.cities && cache.cities[cid] && cache.cities[cid][monthKey]) {
+            const item = cache.cities[cid][monthKey][dayKey] || null;
+            if (item) {
+                const expectedDate = `${year}-${month}-${String(date.getDate()).padStart(2, '0')}`;
+                if (item.date && item.date !== expectedDate) {
+                    log(`[SalatExtension PrayerService] Cache date mismatch for day ${dayKey}: item.date=${item.date}, expected=${expectedDate}`);
+                    return null;
+                }
+                return item;
+            }
+        }
+    }
+    catch (e) {
+        log('[SalatExtension PrayerService] Get cached prayer error: ' + e.message);
+    }
+    return null;
+}
+function setCachedPrayerTimes(cityId, date, data) {
+    try {
+        let cache = loadCache();
+        const year = date.getFullYear();
+        const month = String(date.getMonth() + 1).padStart(2, '0');
+        const monthKey = `${year}-${month}`;
+        const dayKey = String(date.getDate());
+        const cid = String(cityId);
+        if (!cache.cities)
+            cache.cities = {};
+        if (!cache.cities[cid])
+            cache.cities[cid] = {};
+        if (!cache.cities[cid][monthKey])
+            cache.cities[cid][monthKey] = {};
+        cache.cities[cid][monthKey][dayKey] = data;
+        saveCache(cache);
+    }
+    catch (e) {
+        log('[SalatExtension PrayerService] Set cached prayer error: ' + e.message);
+    }
+}
+function getCacheStatus(cityId, date = new Date()) {
+    try {
+        let cache = loadCache();
+        const year = date.getFullYear();
+        const month = date.getMonth() + 1;
+        const monthKey = `${year}-${String(month).padStart(2, '0')}`;
+        const totalDays = new Date(year, month, 0).getDate();
+        const cid = String(cityId);
+        let cachedDays = 0;
+        if (cache.cities && cache.cities[cid] && cache.cities[cid][monthKey]) {
+            cachedDays = Object.keys(cache.cities[cid][monthKey]).length;
+        }
+        return { cachedDays, totalDays };
+    }
+    catch (e) {
+        return { cachedDays: 0, totalDays: 31 };
+    }
+}
+function getMonthlySchedule() {
+    try {
+        let cache = loadCache();
+        return cache.monthlySchedule || null;
+    }
+    catch (e) {
+        return null;
+    }
+}
+function fetchMonthlySchedule(session, force = false, onComplete) {
+    let cache = loadCache();
+    const now = Date.now();
+    const lastSync = (cache.lastSyncTimes && cache.lastSyncTimes['sala_al_jadida_month']) || 0;
+    const isStale = (now - lastSync) >= (12 * 60 * 60 * 1000); // 12 hours
+    if (!force && !isStale && cache.monthlySchedule) {
+        if (onComplete)
+            onComplete(cache.monthlySchedule);
+        return;
+    }
+    if (!session) {
+        if (onComplete)
+            onComplete(cache.monthlySchedule || null);
+        return;
+    }
+    const url = `${Constants.CLOUDFLARE_API_URL}/month.json`;
+    log('[SalatExtension PrayerService] Requesting monthly schedule from Cloudflare: ' + url);
+    const request = Soup.Message.new('GET', url);
+    const handleResponse = (text) => {
+        try {
+            const parsed = JSON.parse(text);
+            if (parsed && Array.isArray(parsed.days) && parsed.days.length > 0) {
+                cache.monthlySchedule = parsed;
+                if (!cache.cities)
+                    cache.cities = {};
+                if (!cache.cities['1'])
+                    cache.cities['1'] = {};
+                if (!cache.lastSyncTimes)
+                    cache.lastSyncTimes = {};
+                for (const day of parsed.days) {
+                    if (day.date) {
+                        const parts = day.date.split('-');
+                        if (parts.length === 3) {
+                            const y = parts[0];
+                            const m = parts[1];
+                            const d = String(parseInt(parts[2], 10));
+                            const monthKey = `${y}-${m}`;
+                            if (!cache.cities['1'][monthKey])
+                                cache.cities['1'][monthKey] = {};
+                            const item = {
+                                Fajr: day.fajr,
+                                Chourouq: day.sunrise,
+                                Dhuhr: day.dhuhr,
+                                Asr: day.asr,
+                                Maghrib: day.maghrib,
+                                Ishae: day.isha,
+                                date: day.date,
+                                day_ar: day.day_ar,
+                                hijri_day: day.hijri_day,
+                                gregorian_day: day.gregorian_day
+                            };
+                            cache.cities['1'][monthKey][d] = item;
+                        }
+                    }
+                }
+                cache.lastSyncTimes['sala_al_jadida_month'] = Date.now();
+                saveCache(cache);
+                log(`[SalatExtension PrayerService] Successfully cached ${parsed.days.length} days from Cloudflare monthly schedule!`);
+                if (onComplete)
+                    onComplete(parsed);
+                return;
+            }
+        }
+        catch (e) {
+            log('[SalatExtension PrayerService] Monthly schedule parse error: ' + e.message);
+        }
+        if (onComplete)
+            onComplete(cache.monthlySchedule || null);
+    };
+    if (session.send_and_read_async) {
+        session.send_and_read_async(request, GLib.PRIORITY_DEFAULT, null, (_sess, res) => {
+            try {
+                const bytes = session.send_and_read_finish(res);
+                handleResponse(new TextDecoder('utf-8').decode(bytes.get_data()));
+            }
+            catch (e) {
+                log('[SalatExtension PrayerService] Monthly schedule fetch error: ' + e.message);
+                if (onComplete)
+                    onComplete(cache.monthlySchedule || null);
+            }
+        });
+    }
+    else {
+        session.queue_message(request, (_sess, message) => {
+            if (message.status_code === 200) {
+                handleResponse(message.response_body.data);
+            }
+            else {
+                log('[SalatExtension PrayerService] Monthly schedule HTTP status: ' + message.status_code);
+                if (onComplete)
+                    onComplete(cache.monthlySchedule || null);
+            }
+        });
+    }
+}
+function syncMonthlyCache(session, cityId, force = false, onComplete) {
+    if (!session)
+        return;
+    // Fast path: for Sala Al-Jadida (City ID 1), sync in a single call via Cloudflare API
+    if (cityId === 1) {
+        fetchMonthlySchedule(session, force, (data) => {
+            if (onComplete)
+                onComplete(data ? data.days_count : 0);
+        });
+        return;
+    }
+    const now = new Date();
+    const year = now.getFullYear();
+    const month = now.getMonth() + 1;
+    const monthKey = `${year}-${String(month).padStart(2, '0')}`;
+    const totalDays = new Date(year, month, 0).getDate();
+    const cid = String(cityId);
+    let cache = loadCache();
+    if (!cache.cities)
+        cache.cities = {};
+    if (!cache.cities[cid])
+        cache.cities[cid] = {};
+    if (!cache.cities[cid][monthKey])
+        cache.cities[cid][monthKey] = {};
+    if (!cache.lastSyncTimes)
+        cache.lastSyncTimes = {};
+    let monthData = cache.cities[cid][monthKey];
+    const syncKey = `${cid}_${monthKey}`;
+    const lastSync = cache.lastSyncTimes[syncKey] || 0;
+    const isStale = (now.getTime() - lastSync) >= ONE_WEEK_MS;
+    let missingDays = [];
+    for (let d = 1; d <= totalDays; d++) {
+        if (isStale || force || !monthData[String(d)]) {
+            missingDays.push(d);
+        }
+    }
+    if (missingDays.length === 0) {
+        log(`[SalatExtension PrayerService] Monthly cache up-to-date for city ${cityId} (${monthKey}) within the past 7 days.`);
+        if (onComplete)
+            onComplete(totalDays);
+        return;
+    }
+    log(`[SalatExtension PrayerService] Syncing monthly cache for city ${cityId} (${monthKey}): fetching ${missingDays.length} days in background (weekly refresh=${isStale})...`);
+    let newCount = 0;
+    const fetchDay = (idx) => {
+        if (idx >= missingDays.length) {
+            cache.lastSyncTimes[syncKey] = Date.now();
+            saveCache(cache);
+            const total = Object.keys(cache.cities[cid][monthKey]).length;
+            log(`[SalatExtension PrayerService] Completed weekly monthly cache sync! ${total}/${totalDays} days now securely cached in ${Constants.CACHE_FILE}`);
+            if (onComplete)
+                onComplete(total);
+            return;
+        }
+        const day = missingDays[idx];
+        const url = `https://apisearch.hadithm6.ma/api/prieres/ville/${cityId}/${month}/${day}`;
+        const request = Soup.Message.new('GET', url);
+        const handleSuccess = (rawText) => {
+            try {
+                const parsed = JSON.parse(rawText);
+                if (Array.isArray(parsed) && parsed.length > 0) {
+                    cache.cities[cid][monthKey][String(day)] = parsed[0];
+                    newCount++;
+                }
+            }
+            catch (e) { }
+            // polite 50ms interval between requests
+            GLib.timeout_add(GLib.PRIORITY_DEFAULT, 50, () => {
+                fetchDay(idx + 1);
+                return GLib.SOURCE_REMOVE;
+            });
+        };
+        if (session.send_and_read_async) {
+            session.send_and_read_async(request, GLib.PRIORITY_DEFAULT, null, (_sess, res) => {
+                try {
+                    const bytes = session.send_and_read_finish(res);
+                    handleSuccess(new TextDecoder('utf-8').decode(bytes.get_data()));
+                }
+                catch (e) {
+                    fetchDay(idx + 1);
+                }
+            });
+        }
+        else {
+            session.queue_message(request, (_sess, message) => {
+                if (message.status_code === 200) {
+                    handleSuccess(message.response_body.data);
+                }
+                else {
+                    fetchDay(idx + 1);
+                }
+            });
+        }
+    };
+    fetchDay(0);
+}
+function fetchPrayerTimes(session, cityId, onSuccess, onError) {
+    const now = new Date();
+    // 1. Instant check from offline cache
+    const cached = getCachedPrayerTimes(cityId, now);
+    if (cached) {
+        log('[SalatExtension PrayerService] Loaded prayer times immediately from offline cache for city ' + cityId);
+        onSuccess(cached);
+    }
+    if (!session) {
+        if (!cached && onError)
+            onError(new Error('No HTTP session'));
+        return;
+    }
+    // 2. For Sala Al-Jadida (City ID 1), fetch via Cloudflare monthly endpoint
+    if (cityId === 1) {
+        const todayStr = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
+        fetchMonthlySchedule(session, false, (schedule) => {
+            if (schedule && schedule.days) {
+                const todayDay = schedule.days.find((d) => d.date === todayStr || Number(d.gregorian_day) === now.getDate());
+                if (todayDay) {
+                    const item = {
+                        Fajr: todayDay.fajr,
+                        Chourouq: todayDay.sunrise,
+                        Dhuhr: todayDay.dhuhr,
+                        Asr: todayDay.asr,
+                        Maghrib: todayDay.maghrib,
+                        Ishae: todayDay.isha,
+                        date: todayDay.date,
+                        day_ar: todayDay.day_ar,
+                        hijri_day: todayDay.hijri_day,
+                        gregorian_day: todayDay.gregorian_day
+                    };
+                    setCachedPrayerTimes(cityId, now, item);
+                    if (!cached || cached.date !== todayStr)
+                        onSuccess(item);
+                    return;
+                }
+            }
+            if (!cached && onError)
+                onError(new Error('Could not find today prayer times from Cloudflare schedule'));
+        });
+        return;
+    }
+    // 3. Fallback network live request for other cities
+    const url = `https://apisearch.hadithm6.ma/api/prieres/ville/${cityId}/${now.getMonth() + 1}/${now.getDate()}`;
+    log('[SalatExtension PrayerService] Requesting live prayer times URL: ' + url);
+    const request = Soup.Message.new('GET', url);
+    const parseResponse = (responseText) => {
+        try {
+            log('[SalatExtension PrayerService] Raw response length: ' + responseText.length);
+            const data = JSON.parse(responseText);
+            if (Array.isArray(data) && data.length > 0) {
+                log('[SalatExtension PrayerService] Prayer data successfully parsed from live API.');
+                setCachedPrayerTimes(cityId, now, data[0]);
+                onSuccess(data[0]);
+                // Sync the rest of the month in background so offline mode is fully prepared
+                syncMonthlyCache(session, cityId);
+            }
+            else {
+                log('[SalatExtension PrayerService] Response is empty array or invalid format.');
+                if (!cached && onError)
+                    onError(new Error('Empty array in API response'));
+            }
+        }
+        catch (e) {
+            log('[SalatExtension PrayerService] Parse error: ' + e.message);
+            if (!cached && onError)
+                onError(e);
+        }
+    };
+    if (session.send_and_read_async) {
+        session.send_and_read_async(request, GLib.PRIORITY_DEFAULT, null, (_sess, res) => {
+            try {
+                const bytes = session.send_and_read_finish(res);
+                parseResponse(new TextDecoder('utf-8').decode(bytes.get_data()));
+            }
+            catch (e) {
+                log('[SalatExtension PrayerService] Network fetch error (running offline): ' + e.message);
+                if (cached) {
+                    log('[SalatExtension PrayerService] Seamlessly continuing with cached prayer times.');
+                }
+                else if (onError) {
+                    onError(e);
+                }
+            }
+        });
+    }
+    else {
+        session.queue_message(request, (_sess, message) => {
+            if (message.status_code === 200) {
+                parseResponse(message.response_body.data);
+            }
+            else {
+                log('[SalatExtension PrayerService] Queue message failed status (running offline): ' + message.status_code);
+                if (cached) {
+                    log('[SalatExtension PrayerService] Seamlessly continuing with cached prayer times.');
+                }
+                else if (onError) {
+                    onError(new Error(`HTTP Status ${message.status_code}`));
+                }
+            }
+        });
+    }
+}

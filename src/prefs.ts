@@ -4,54 +4,25 @@ import Adw from 'gi://Adw';
 import Gtk from 'gi://Gtk';
 import GLib from 'gi://GLib';
 
-import * as Constants from './constants.js';
-import * as Config from './config.js';
-import * as I18n from './i18n.js';
-import * as Api from './api.js';
+import * as Constants from './core/constants.js';
+import * as Config from './services/config-service.js';
+import * as I18n from './utils/i18n.js';
+import * as Api from './services/prayer-service.js';
+import * as AudioService from './services/audio-service.js';
+import * as SystemService from './services/system-service.js';
+import { findExtensionFile } from './utils/file-utils.js';
 
 function playAudioPreview(path: string): void {
     if (!path) return;
-    try {
-        let extPath = GLib.build_filenamev([GLib.get_home_dir(), '.local', 'share', 'gnome-shell', 'extensions', 'salat-timer@moroccan-habous', 'play_audio.py']);
-        let cur = GLib.build_filenamev([GLib.get_current_dir(), 'play_audio.py']);
-        let srcCur = GLib.build_filenamev([GLib.get_current_dir(), 'src', 'play_audio.py']);
-        let script = GLib.file_test(extPath, GLib.FileTest.EXISTS) ? extPath : (GLib.file_test(cur, GLib.FileTest.EXISTS) ? cur : (GLib.file_test(srcCur, GLib.FileTest.EXISTS) ? srcCur : null));
-
-        if (script) {
-            GLib.spawn_command_line_async(`python3 "${script}" "${path}"`);
-            return;
-        }
-
-        const pyScript = "import gi, sys, os; gi.require_version('Gst', '1.0'); from gi.repository import Gst, GLib; Gst.init(None); p = Gst.ElementFactory.make('playbin', 'p'); p.set_property('uri', GLib.filename_to_uri(os.path.abspath(sys.argv[1]), None)); p.set_state(Gst.State.PLAYING); loop = GLib.MainLoop(); b = p.get_bus(); b.add_watch(GLib.PRIORITY_DEFAULT, lambda bus, msg: loop.quit() if msg.type in (Gst.MessageType.EOS, Gst.MessageType.ERROR) else True); loop.run(); p.set_state(Gst.State.NULL)";
-        GLib.spawn_command_line_async(`python3 -c "${pyScript}" "${path}"`);
-    } catch (e: any) {
-        log('[SalatExtension Prefs] Error in audio test: ' + e.message);
-    }
+    AudioService.playAudio(path);
 }
 
 function resolveDefaultAdhanPath(): string {
-    let cur = GLib.build_filenamev([GLib.get_current_dir(), 'adan.mp3']);
-    if (GLib.file_test(cur, GLib.FileTest.EXISTS)) return cur;
-    let extPath = GLib.build_filenamev([GLib.get_home_dir(), '.local', 'share', 'gnome-shell', 'extensions', 'salat-timer@moroccan-habous', 'adan.mp3']);
-    if (GLib.file_test(extPath, GLib.FileTest.EXISTS)) return extPath;
-    return '';
+    return findExtensionFile('adan.mp3') || '';
 }
 
 function openScheduleDedicatedWindow(): void {
-    try {
-        let extPath = GLib.build_filenamev([GLib.get_home_dir(), '.local', 'share', 'gnome-shell', 'extensions', 'salat-timer@moroccan-habous', 'schedule_window.py']);
-        let cur = GLib.build_filenamev([GLib.get_current_dir(), 'schedule_window.py']);
-        let srcCur = GLib.build_filenamev([GLib.get_current_dir(), 'src', 'schedule_window.py']);
-        let script = GLib.file_test(extPath, GLib.FileTest.EXISTS) ? extPath : (GLib.file_test(cur, GLib.FileTest.EXISTS) ? cur : (GLib.file_test(srcCur, GLib.FileTest.EXISTS) ? srcCur : null));
-
-        if (script) {
-            GLib.spawn_command_line_async(`python3 "${script}"`);
-        } else {
-            GLib.spawn_command_line_async('python3 -m salat_schedule 2>/dev/null || true');
-        }
-    } catch (e: any) {
-        log('[SalatExtension Prefs] Error opening schedule window: ' + e.message);
-    }
+    SystemService.openScheduleWindow();
 }
 
 export default class SalatPreferences extends ExtensionPreferences {

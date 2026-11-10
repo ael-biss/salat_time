@@ -111,7 +111,7 @@ pack: compile check
 check:
 	@if [ -n "$(NODE)" ] && [ -d "$(DIST_DIR)" ]; then \
 		echo " 🔍 Checking compiled JS syntax for GNOME 42.9..."; \
-		for f in $(DIST_DIR)/*.js; do \
+		for f in $$(find $(DIST_DIR) -name '*.js'); do \
 			[ -f "$$f" ] && $(NODE) -c "$$f" || exit 1; \
 		done; \
 		echo "✔ Compiled JS files passed syntax check!"; \
