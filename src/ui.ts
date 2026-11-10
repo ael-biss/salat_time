@@ -82,12 +82,119 @@ export function updatePanelText(indicator: any, prayerTimesData: PrayerTimesData
     }
 }
 
+export function formatHeroCountdown(diffMs: number): string {
+    const totalSecs = Math.max(0, Math.floor(diffMs / 1000));
+    const hours = Math.floor(totalSecs / 3600);
+    const mins = Math.floor((totalSecs % 3600) / 60);
+    const secs = totalSecs % 60;
+
+    if (hours > 0) {
+        return `${hours}h ${String(mins).padStart(2, '0')}m ${String(secs).padStart(2, '0')}s`;
+    }
+    if (mins > 0) {
+        return `${mins}m ${String(secs).padStart(2, '0')}s`;
+    }
+    return `${secs}s`;
+}
+
+export function calculateProgressPercent(active: ActivePrayer, prayers: PrayerEntry[], now: Date): number {
+    try {
+        let cycleStart = 0;
+        let cycleEnd = 0;
+        if (active.phase === 'IQAMA') {
+            cycleStart = active.prayer.adhanDate.getTime();
+            cycleEnd = active.prayer.iqamaDate.getTime();
+        } else {
+            const prayerIdx = prayers.findIndex(p => p.key === active.prayer.key);
+            if (prayerIdx > 0) {
+                cycleStart = prayers[prayerIdx - 1].iqamaDate.getTime();
+            } else {
+                const fajrTime = active.prayer.adhanDate.getTime();
+                cycleStart = fajrTime - (8 * 3600 * 1000);
+            }
+            cycleEnd = active.prayer.adhanDate.getTime();
+        }
+        const totalCycle = Math.max(1000, cycleEnd - cycleStart);
+        const elapsed = Math.max(0, now.getTime() - cycleStart);
+        return Math.min(1.0, Math.max(0.05, elapsed / totalCycle));
+    } catch (e) {
+        return 0.35;
+    }
+}
+
+export function updateMenuHero(indicator: any, config: UserConfig, prayerTimesData: PrayerTimesData | null, now: Date): void {
+    if (!prayerTimesData || !indicator || !indicator._heroWidgets) return;
+
+    const hw = indicator._heroWidgets;
+    const prayers = Calculator.getPrayerEntries(prayerTimesData, config.iqamaDelays, config.lang, now);
+    const active = Calculator.findActivePrayer(prayers, config.iqamaDelays, now);
+    if (!active) return;
+
+    // If active prayer or phase transitioned, request a full menu rebuild
+    if (hw.activePrayerKey !== active.prayer.key || hw.activePhase !== active.phase) {
+        if (typeof indicator._reloadCallback === 'function') {
+            indicator._reloadCallback();
+        }
+        return;
+    }
+
+    // 1. Update giant countdown with live seconds
+    let diffMs = 0;
+    if (active.phase === 'IQAMA') {
+        diffMs = Math.max(0, active.prayer.iqamaDate.getTime() - now.getTime());
+    } else {
+        diffMs = Math.max(0, active.prayer.adhanDate.getTime() - now.getTime());
+    }
+
+    if (hw.countdownLabel) {
+        hw.countdownLabel.set_text(formatHeroCountdown(diffMs));
+    }
+
+    // 2. Update top tag (e.g. NEXT · FAJR · TODAY)
+    const isTomorrow = active.prayer.adhanDate.getDate() !== now.getDate();
+    const nextTargetWord = isTomorrow ? 'TOMORROW' : 'TODAY';
+    const phaseWord = active.phase === 'IQAMA' ? 'IQAMA' : 'NEXT';
+    const heroTag = `${phaseWord} · ${active.prayer.name.toUpperCase()} · ${nextTargetWord}`;
+    if (hw.heroTagLabel) {
+        hw.heroTagLabel.set_text(heroTag);
+    }
+
+    // 3. Update adhan & iqama times
+    const iqamaH = String(active.prayer.iqamaDate.getHours()).padStart(2, '0');
+    const iqamaM = String(active.prayer.iqamaDate.getMinutes()).padStart(2, '0');
+    if (hw.adhanTimeLabel) {
+        hw.adhanTimeLabel.set_text(`Adhan ${active.prayer.time}`);
+    }
+    if (hw.iqamaTimeLabel) {
+        hw.iqamaTimeLabel.set_text(`Iqama ${iqamaH}:${iqamaM}`);
+    }
+
+    // 4. Update progress bar
+    const progressPercent = calculateProgressPercent(active, prayers, now);
+    const fillWidth = Math.max(12, Math.round(progressPercent * 280));
+    if (hw.progressFill) {
+        try {
+            hw.progressFill.set_width(fillWidth);
+        } catch (e) {
+            hw.progressFill.width = fillWidth;
+        }
+    }
+
+    // 5. Update header date if day rolled over
+    if (hw.dateLabel) {
+        hw.dateLabel.set_text(formatHeaderDate(now, config.lang));
+    }
+}
+
 export function rebuildMenu(indicator: any, config: UserConfig, prayerTimesData: PrayerTimesData | null, callbacks: any, wuduDone: boolean = false): void {
     if (!prayerTimesData || !indicator) return;
 
     const now = new Date();
     const prayers: PrayerEntry[] = Calculator.getPrayerEntries(prayerTimesData, config.iqamaDelays, config.lang, now);
     const active: ActivePrayer | null = Calculator.findActivePrayer(prayers, config.iqamaDelays, now);
+
+    indicator._reloadCallback = callbacks && typeof callbacks.onReloadUI === 'function' ? callbacks.onReloadUI : null;
+    indicator._heroWidgets = null;
 
     indicator.menu.removeAll();
 
@@ -170,17 +277,14 @@ export function rebuildMenu(indicator: any, config: UserConfig, prayerTimesData:
 
         heroBox.add_child(heroTopRow);
 
-        // Giant Countdown: e.g. 7h 35m
+        // Giant Countdown: e.g. 7h 35m 12s
         let diffMs = 0;
         if (active.phase === 'IQAMA') {
             diffMs = Math.max(0, active.prayer.iqamaDate.getTime() - now.getTime());
         } else {
             diffMs = Math.max(0, active.prayer.adhanDate.getTime() - now.getTime());
         }
-        const totalMins = Math.floor(diffMs / 60000);
-        const hours = Math.floor(totalMins / 60);
-        const mins = totalMins % 60;
-        const countdownStr = hours > 0 ? `${hours}h ${String(mins).padStart(2, '0')}m` : `${mins}m`;
+        const countdownStr = formatHeroCountdown(diffMs);
 
         let countdownLabel = new St.Label({
             text: countdownStr,
@@ -195,14 +299,7 @@ export function rebuildMenu(indicator: any, config: UserConfig, prayerTimesData:
         });
 
         // Calculate progress percentage
-        let progressPercent = 0.35; // reasonable fallback
-        try {
-            const nextTime = active.prayer.adhanDate.getTime();
-            const totalCycle = 6 * 3600 * 1000; // estimated default span
-            const elapsed = Math.max(0, totalCycle - diffMs);
-            progressPercent = Math.min(1.0, Math.max(0.08, elapsed / totalCycle));
-        } catch (e) {}
-
+        const progressPercent = calculateProgressPercent(active, prayers, now);
         let progressFill = new St.BoxLayout({
             style_class: 'salat-progress-fill',
             width: Math.max(12, Math.round(progressPercent * 280))
@@ -212,6 +309,17 @@ export function rebuildMenu(indicator: any, config: UserConfig, prayerTimesData:
 
         addChild(heroItem, heroBox);
         indicator.menu.addMenuItem(heroItem);
+
+        indicator._heroWidgets = {
+            dateLabel,
+            heroTagLabel,
+            adhanTimeLabel,
+            iqamaTimeLabel,
+            countdownLabel,
+            progressFill,
+            activePrayerKey: active.prayer.key,
+            activePhase: active.phase
+        };
     }
 
     // 3. Table Column Headers:               ADHAN          IQAMA

@@ -29,6 +29,7 @@ export default class SalatExtension extends Extension {
     private triggeredWuduReminders: Record<string, boolean> = {};
     private wuduDone: boolean = false;
     private lastWuduPrayerKey: string = '';
+    private lastTransitionKey: string = '';
 
     enable() {
         log('[SalatExtension ESM] Enabling extension...');
@@ -57,6 +58,9 @@ export default class SalatExtension extends Extension {
                 } else if (this.config) {
                     UI.updatePanelText(this.indicator, this.prayerTimesData, this.config.iqamaDelays, this.config.lang, this.wuduDone);
                     this.checkPrayerEvents(now);
+                    if (this.indicator && this.indicator.menu && this.indicator.menu.isOpen) {
+                        UI.updateMenuHero(this.indicator, this.config, this.prayerTimesData, now);
+                    }
                 }
                 return GLib.SOURCE_CONTINUE;
             });
@@ -82,6 +86,7 @@ export default class SalatExtension extends Extension {
                 this.indicator.destroy();
                 this.indicator = null;
             }
+            this.lastTransitionKey = '';
             this.destroyOldStatusAreaRole();
             log('[SalatExtension ESM] Extension disabled cleanly.');
         } catch (e: any) {
@@ -150,6 +155,9 @@ export default class SalatExtension extends Extension {
                 },
                 onOpenScheduleWindow: () => {
                     this.openScheduleWindow();
+                },
+                onReloadUI: () => {
+                    this.reloadAndSyncUI();
                 }
             }, this.wuduDone);
             log('[SalatExtension ESM] UI sync completed successfully.');
@@ -204,9 +212,19 @@ export default class SalatExtension extends Extension {
                 this.indicator.destroy();
                 this.indicator = null;
             }
+            this.lastTransitionKey = '';
             this.destroyOldStatusAreaRole();
 
             this.indicator = new PanelMenu.Button(0.0, "Salat & Iqama Indicator", false);
+
+            this.indicator.menu.connect('open-state-changed', (menu: any, isOpen: boolean) => {
+                if (isOpen) {
+                    const now = new Date();
+                    if (this.config && this.prayerTimesData) {
+                        UI.updateMenuHero(this.indicator, this.config, this.prayerTimesData, now);
+                    }
+                }
+            });
 
             let box = new St.BoxLayout({
                 style_class: 'panel-status-indicators-box',
@@ -336,11 +354,19 @@ export default class SalatExtension extends Extension {
         );
 
         const active = Calculator.findActivePrayer(prayers, this.config.iqamaDelays, now);
-        if (active && this.wuduDone && this.lastWuduPrayerKey && active.prayer.key !== this.lastWuduPrayerKey) {
-            log(`[SalatExtension ESM] Prayer transitioned (${this.lastWuduPrayerKey} -> ${active.prayer.key}). Clearing Wudu mark.`);
-            this.wuduDone = false;
-            this.lastWuduPrayerKey = '';
-            this.reloadAndSyncUI();
+        if (active) {
+            const currentTransitionKey = `${active.prayer.key}_${active.phase}`;
+            if (this.lastTransitionKey && this.lastTransitionKey !== currentTransitionKey) {
+                log(`[SalatExtension ESM] Prayer or phase transitioned (${this.lastTransitionKey} -> ${currentTransitionKey}). Syncing UI.`);
+                if (this.wuduDone && this.lastWuduPrayerKey && active.prayer.key !== this.lastWuduPrayerKey) {
+                    this.wuduDone = false;
+                    this.lastWuduPrayerKey = '';
+                }
+                this.lastTransitionKey = currentTransitionKey;
+                this.reloadAndSyncUI();
+            } else if (!this.lastTransitionKey) {
+                this.lastTransitionKey = currentTransitionKey;
+            }
         }
 
         const datePrefix = `${now.getFullYear()}-${now.getMonth() + 1}-${now.getDate()}`;

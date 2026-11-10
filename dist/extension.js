@@ -15,6 +15,7 @@ let triggeredFridayReminders = {};
 let triggeredWuduReminders = {};
 let wuduDone = false;
 let lastWuduPrayerKey = '';
+let lastTransitionKey = '';
 
 function _getModules() {
     const Me = ExtensionUtils.getCurrentExtension();
@@ -90,6 +91,9 @@ function reloadAndSyncUI() {
             },
             onOpenScheduleWindow: () => {
                 openScheduleWindow();
+            },
+            onReloadUI: () => {
+                reloadAndSyncUI();
             }
         }, wuduDone);
         log('[SalatExtension Legacy] UI sync completed successfully.');
@@ -235,11 +239,19 @@ function checkPrayerEvents(now) {
     );
 
     const active = Calculator.findActivePrayer(prayers, config.iqamaDelays, now);
-    if (active && wuduDone && lastWuduPrayerKey && active.prayer.key !== lastWuduPrayerKey) {
-        log('[SalatExtension Legacy] Prayer cycle transitioned (' + lastWuduPrayerKey + ' -> ' + active.prayer.key + '). Resetting Wudu mark.');
-        wuduDone = false;
-        lastWuduPrayerKey = '';
-        reloadAndSyncUI();
+    if (active) {
+        const currentTransitionKey = active.prayer.key + '_' + active.phase;
+        if (lastTransitionKey && lastTransitionKey !== currentTransitionKey) {
+            log('[SalatExtension Legacy] Prayer or phase transitioned (' + lastTransitionKey + ' -> ' + currentTransitionKey + '). Syncing UI.');
+            if (wuduDone && lastWuduPrayerKey && active.prayer.key !== lastWuduPrayerKey) {
+                wuduDone = false;
+                lastWuduPrayerKey = '';
+            }
+            lastTransitionKey = currentTransitionKey;
+            reloadAndSyncUI();
+        } else if (!lastTransitionKey) {
+            lastTransitionKey = currentTransitionKey;
+        }
     }
 
     const datePrefix = now.getFullYear() + '-' + (now.getMonth() + 1) + '-' + now.getDate();
@@ -503,9 +515,20 @@ function recreatePanelIndicator() {
             indicator.destroy();
             indicator = null;
         }
+        lastTransitionKey = '';
         destroyOldStatusAreaRole();
 
         indicator = new PanelMenu.Button(0.0, "Salat & Iqama Indicator", false);
+
+        indicator.menu.connect('open-state-changed', (menu, isOpen) => {
+            if (isOpen) {
+                const now = new Date();
+                const { UI } = _getModules();
+                if (config && prayerTimesData && UI) {
+                    UI.updateMenuHero(indicator, config, prayerTimesData, now);
+                }
+            }
+        });
 
         let box = new St.BoxLayout({
             style_class: 'panel-status-indicators-box',
@@ -581,6 +604,9 @@ function enable() {
             } else if (config) {
                 UI.updatePanelText(indicator, prayerTimesData, config.iqamaDelays, config.lang, wuduDone);
                 checkPrayerEvents(now);
+                if (indicator && indicator.menu && indicator.menu.isOpen) {
+                    UI.updateMenuHero(indicator, config, prayerTimesData, now);
+                }
             }
             return GLib.SOURCE_CONTINUE;
         });
@@ -606,6 +632,7 @@ function disable() {
             indicator.destroy();
             indicator = null;
         }
+        lastTransitionKey = '';
         destroyOldStatusAreaRole();
         log('[SalatExtension Legacy] Extension disabled cleanly.');
     } catch (e) {
